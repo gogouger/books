@@ -7,6 +7,9 @@ from .series import router as series_router
 
 router = APIRouter()
 router.include_router(auth_router)
-router.include_router(books_router)
-router.include_router(kindle_router)
-router.include_router(series_router)
+
+library_router = APIRouter(prefix="/{username}")
+library_router.include_router(books_router)
+library_router.include_router(kindle_router)
+library_router.include_router(series_router)
+router.include_router(library_router)

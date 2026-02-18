@@ -1,9 +1,17 @@
 import { api } from '../api';
 import { getToken } from '../auth';
-import { navigate } from '../router';
+import { getLibraryUsername, isOwner } from '../context';
+import { navigate, navigateHome } from '../router';
 
 export function renderAddBook(): void {
     const app = document.getElementById('app')!;
+    const username = getLibraryUsername()!;
+
+    if (!isOwner()) {
+        navigateHome();
+        return;
+    }
+
     app.innerHTML = `
         <div style="max-width: 700px; margin: 0 auto;">
             <h4 class="mb-3">Add Book</h4>
@@ -92,7 +100,7 @@ export function renderAddBook(): void {
             const headers: Record<string, string> = {};
             if (token) headers['Authorization'] = `Bearer ${token}`;
 
-            const resp = await fetch('/api/metadata/extract', {
+            const resp = await fetch(`/api/${username}/metadata/extract`, {
                 method: 'POST',
                 headers,
                 body: formData,
@@ -116,7 +124,7 @@ export function renderAddBook(): void {
         resultsDiv.innerHTML = '<div class="spinner-border spinner-border-sm"></div>';
 
         try {
-            const data = await api.searchMetadata(query);
+            const data = await api.searchMetadata(username, query);
             if (!data.results.length) {
                 resultsDiv.innerHTML = '<p class="text-muted">No results found</p>';
                 return;
@@ -166,7 +174,7 @@ export function renderAddBook(): void {
             if (series) metadata.series = series;
             if (seriesIndex) metadata.series_index = parseFloat(seriesIndex);
 
-            const book = await api.uploadBook(file, metadata);
+            const book = await api.uploadBook(username, file, metadata);
             navigate(`#/book/${book.id}`);
         } catch (err: any) {
             showError(err.message);

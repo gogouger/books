@@ -1,11 +1,12 @@
 import { api } from '../api';
-import { navigate } from '../router';
+import { getLibraryUsername } from '../context';
 import { ratingStarsHtml } from '../components/rating-stars';
 
 export async function renderSeriesView(
     params: Record<string, string>
 ): Promise<void> {
     const app = document.getElementById('app')!;
+    const username = getLibraryUsername()!;
     const seriesName = params.name;
 
     app.innerHTML = `
@@ -17,7 +18,7 @@ export async function renderSeriesView(
     `;
 
     try {
-        const data = await api.getSeriesBooks(seriesName);
+        const data = await api.getSeriesBooks(username, seriesName);
         const books: any[] = data.books;
 
         // Find first unread

@@ -21,13 +21,11 @@
       const refreshed = await showLoginPrompt();
       if (!refreshed) {
         clearAuth();
-        window.location.hash = "#/login";
+        window.location.href = "/";
       }
       throw new Error("Not authenticated");
     }
     if (resp.status === 403) {
-      clearAuth();
-      window.location.hash = "#/login";
       throw new Error("Not authorized");
     }
     if (!resp.ok) {
@@ -52,7 +50,7 @@
       const refreshed = await showLoginPrompt();
       if (!refreshed) {
         clearAuth();
-        window.location.hash = "#/login";
+        window.location.href = "/";
       }
       throw new Error("Not authenticated");
     }
@@ -71,46 +69,46 @@
         body: JSON.stringify({ kindle_email: email })
       });
     },
-    async getBooks(params = {}) {
+    async getBooks(username2, params = {}) {
       const qs = new URLSearchParams();
       for (const [k, v] of Object.entries(params)) {
         if (v !== void 0 && v !== null && v !== "") {
           qs.set(k, String(v));
         }
       }
-      return apiFetch(`/books?${qs.toString()}`);
+      return apiFetch(`/${username2}/books?${qs.toString()}`);
     },
-    async getBook(id) {
-      return apiFetch(`/books/${id}`);
+    async getBook(username2, id) {
+      return apiFetch(`/${username2}/books/${id}`);
     },
-    async updateBook(id, updates) {
-      return apiFetch(`/books/${id}`, {
+    async updateBook(username2, id, updates) {
+      return apiFetch(`/${username2}/books/${id}`, {
         method: "PATCH",
         body: JSON.stringify(updates)
       });
     },
-    async deleteBook(id) {
-      return apiFetch(`/books/${id}`, { method: "DELETE" });
+    async deleteBook(username2, id) {
+      return apiFetch(`/${username2}/books/${id}`, { method: "DELETE" });
     },
-    async sendToKindle(bookId, email) {
-      return apiFetch(`/books/${bookId}/kindle`, {
+    async sendToKindle(username2, bookId, email) {
+      return apiFetch(`/${username2}/books/${bookId}/kindle`, {
         method: "POST",
         body: JSON.stringify(email ? { email } : {})
       });
     },
-    async getSeries() {
-      return apiFetch("/series");
+    async getSeries(username2) {
+      return apiFetch(`/${username2}/series`);
     },
-    async getSeriesBooks(name) {
-      return apiFetch(`/series/${encodeURIComponent(name)}`);
+    async getSeriesBooks(username2, name) {
+      return apiFetch(`/${username2}/series/${encodeURIComponent(name)}`);
     },
-    async searchMetadata(query, source = "google") {
-      return apiFetch("/metadata/search", {
+    async searchMetadata(username2, query, source = "google") {
+      return apiFetch(`/${username2}/metadata/search`, {
         method: "POST",
         body: JSON.stringify({ query, source })
       });
     },
-    async uploadBook(file, metadata) {
+    async uploadBook(username2, file, metadata) {
       const formData = new FormData();
       formData.append("file", file);
       const qs = new URLSearchParams();
@@ -124,7 +122,7 @@
       const token = getToken();
       const headers = {};
       if (token) headers["Authorization"] = `Bearer ${token}`;
-      const resp = await fetch(`${API_BASE}/books?${qs.toString()}`, {
+      const resp = await fetch(`${API_BASE}/${username2}/books?${qs.toString()}`, {
         method: "POST",
         headers,
         body: formData
@@ -138,8 +136,8 @@
     coverUrl(userId, coverFilename) {
       return `/covers/${userId}/${coverFilename}`;
     },
-    async downloadFile(bookId, title) {
-      const resp = await apiFetchRaw(`/books/${bookId}/file`);
+    async downloadFile(username2, bookId, title) {
+      const resp = await apiFetchRaw(`/${username2}/books/${bookId}/file`);
       const blob = await resp.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -151,91 +149,6 @@
       URL.revokeObjectURL(url);
     }
   };
-
-  // src/router.ts
-  var routes = [];
-  function addRoute(path, handler) {
-    const keys = [];
-    const pattern = path.replace(/:([^/]+)/g, (_match, key) => {
-      keys.push(key);
-      return "([^/]+)";
-    });
-    routes.push({
-      pattern: new RegExp(`^${pattern}$`),
-      keys,
-      handler
-    });
-  }
-  function navigate(hash) {
-    window.location.hash = hash;
-  }
-  function startRouter() {
-    const handleRoute = () => {
-      const hash = window.location.hash.slice(1) || "/books";
-      for (const route of routes) {
-        const match = hash.match(route.pattern);
-        if (match) {
-          const params = {};
-          route.keys.forEach((key, i) => {
-            params[key] = decodeURIComponent(match[i + 1]);
-          });
-          route.handler(params);
-          updateActiveNav(hash);
-          return;
-        }
-      }
-      window.location.hash = "#/books";
-    };
-    window.addEventListener("hashchange", handleRoute);
-    handleRoute();
-  }
-  function updateActiveNav(hash) {
-    document.querySelectorAll("#nav-links .nav-link").forEach((link) => {
-      const href = link.getAttribute("href") || "";
-      const isActive = hash.startsWith(href.slice(1));
-      link.classList.toggle("active", isActive);
-    });
-  }
-
-  // src/pages/login.ts
-  function renderLogin() {
-    const app = document.getElementById("app");
-    app.innerHTML = `
-        <div class="login-container">
-            <div class="card shadow-sm">
-                <div class="card-body p-4">
-                    <h3 class="text-center mb-4">
-                        <i class="bi bi-book"></i> Books
-                    </h3>
-                    <div id="login-error" class="alert alert-danger d-none"></div>
-                    <div id="google-signin-button" class="d-flex justify-content-center"></div>
-                </div>
-            </div>
-        </div>
-    `;
-    renderGoogleButton("google-signin-button");
-  }
-  function updateNavbar() {
-    const user = getUser();
-    const navUser = document.getElementById("nav-user");
-    const navLinks = document.getElementById("nav-links");
-    const navUsername = document.getElementById("nav-username");
-    const navLogout = document.getElementById("nav-logout");
-    if (user) {
-      navLinks.style.display = "";
-      navUser.style.display = "";
-      navUsername.textContent = user.display_name;
-      navLogout.onclick = (e) => {
-        e.preventDefault();
-        clearAuth();
-        navigate("#/login");
-        updateNavbar();
-      };
-    } else {
-      navLinks.style.display = "none";
-      navUser.style.display = "none";
-    }
-  }
 
   // src/auth.ts
   var GOOGLE_CLIENT_ID = "110972621303-tb5jjugmk28id2mu3ttnpvmecu89b6ak.apps.googleusercontent.com";
@@ -260,7 +173,7 @@
     const timeUntilExpiry = exp * 1e3 - Date.now() - 5 * 60 * 1e3;
     if (timeUntilExpiry <= 0) {
       clearAuth();
-      window.location.hash = "#/login";
+      window.location.href = "/";
       return;
     }
     tokenRefreshTimeout = setTimeout(() => {
@@ -320,8 +233,7 @@
         try {
           const me = await apiFetch("/auth/me");
           setUser(me);
-          updateNavbar();
-          navigate("#/books");
+          window.location.href = `/${me.username}/`;
         } catch (err) {
           clearAuth();
           const errorEl = document.getElementById("login-error");
@@ -364,6 +276,162 @@
     const token = getToken();
     if (token) {
       scheduleTokenRefresh(token);
+    }
+  }
+
+  // src/context.ts
+  function getLibraryUsername() {
+    const match = window.location.pathname.match(
+      /^\/([a-zA-Z0-9_-]+)\/?/
+    );
+    return match ? match[1] : null;
+  }
+  function isOwner() {
+    const libraryUser = getLibraryUsername();
+    if (!libraryUser) return false;
+    const me = getUser();
+    if (!me) return false;
+    return me.username === libraryUser;
+  }
+
+  // src/router.ts
+  var routes = [];
+  var defaultHandler = null;
+  function addRoute(path, handler) {
+    const keys = [];
+    const pattern = path.replace(/:([^/]+)/g, (_match, key) => {
+      keys.push(key);
+      return "([^/]+)";
+    });
+    routes.push({
+      pattern: new RegExp(`^${pattern}$`),
+      keys,
+      handler
+    });
+  }
+  function setDefaultRoute(handler) {
+    defaultHandler = handler;
+  }
+  function navigate(hash) {
+    window.location.hash = hash;
+  }
+  function navigateHome() {
+    history.pushState(null, "", window.location.pathname);
+    handleRoute();
+  }
+  var handleRoute;
+  function startRouter() {
+    handleRoute = () => {
+      const hash = window.location.hash.slice(1);
+      if (hash) {
+        for (const route of routes) {
+          const match = hash.match(route.pattern);
+          if (match) {
+            const params = {};
+            route.keys.forEach((key, i) => {
+              params[key] = decodeURIComponent(match[i + 1]);
+            });
+            route.handler(params);
+            updateActiveNav(hash);
+            return;
+          }
+        }
+      }
+      if (defaultHandler) {
+        if (window.location.hash) {
+          history.replaceState(null, "", window.location.pathname);
+        }
+        defaultHandler({});
+        updateActiveNav("");
+      }
+    };
+    window.addEventListener("hashchange", handleRoute);
+    handleRoute();
+  }
+  function updateActiveNav(hash) {
+    document.querySelectorAll("#nav-links .nav-link").forEach((link) => {
+      const href = link.getAttribute("href") || "";
+      if (!href || href === "#") {
+        link.classList.toggle("active", !hash);
+      } else {
+        const isActive = hash.startsWith(href.slice(1));
+        link.classList.toggle("active", isActive);
+      }
+    });
+  }
+
+  // src/pages/login.ts
+  function renderLogin() {
+    const app = document.getElementById("app");
+    app.innerHTML = `
+        <div class="login-container">
+            <div class="card shadow-sm">
+                <div class="card-body p-4">
+                    <h3 class="text-center mb-4">
+                        <i class="bi bi-book"></i> Books
+                    </h3>
+                    <div id="login-error" class="alert alert-danger d-none"></div>
+                    <div id="google-signin-button" class="d-flex justify-content-center"></div>
+                </div>
+            </div>
+        </div>
+    `;
+    renderGoogleButton("google-signin-button");
+  }
+  function updateNavbar() {
+    const user = getUser();
+    const libraryUser = getLibraryUsername();
+    const navLinks = document.getElementById("nav-links");
+    const navUser = document.getElementById("nav-user");
+    const navUsername = document.getElementById("nav-username");
+    const navLogout = document.getElementById("nav-logout");
+    const navSignin = document.getElementById("nav-signin");
+    const navMyLibrary = document.getElementById("nav-my-library");
+    const navAddItem = document.getElementById("nav-add-item");
+    navLinks.style.display = "none";
+    navUser.style.display = "none";
+    navAddItem.style.display = "none";
+    navUsername.textContent = "";
+    navLogout.classList.add("d-none");
+    navSignin.classList.add("d-none");
+    navMyLibrary.classList.add("d-none");
+    if (!libraryUser) {
+      if (user) {
+        navUser.style.display = "";
+        navUsername.textContent = user.display_name;
+        navLogout.classList.remove("d-none");
+        navLogout.onclick = (e) => {
+          e.preventDefault();
+          clearAuth();
+          window.location.href = "/";
+        };
+      }
+      return;
+    }
+    navLinks.style.display = "";
+    navUser.style.display = "";
+    const isOwner2 = user && user.username === libraryUser;
+    if (isOwner2) {
+      navAddItem.style.display = "";
+      navUsername.textContent = user.display_name;
+      navLogout.classList.remove("d-none");
+      navLogout.onclick = (e) => {
+        e.preventDefault();
+        clearAuth();
+        window.location.href = "/";
+      };
+    } else if (user) {
+      navMyLibrary.classList.remove("d-none");
+      navMyLibrary.href = `/${user.username}/`;
+      navUsername.textContent = user.display_name;
+      navLogout.classList.remove("d-none");
+      navLogout.onclick = (e) => {
+        e.preventDefault();
+        clearAuth();
+        window.location.href = "/";
+      };
+    } else {
+      navSignin.classList.remove("d-none");
     }
   }
 
@@ -546,6 +614,7 @@
     await loadBooks();
   }
   async function loadBooks() {
+    const username2 = getLibraryUsername();
     const gridContainer = document.getElementById("book-grid-container");
     const paginationContainer = document.getElementById("pagination-container");
     const countEl = document.getElementById("book-count");
@@ -565,7 +634,7 @@
       };
       if (currentState.q) params.q = currentState.q;
       if (currentState.is_read !== "") params.is_read = currentState.is_read;
-      const data = await api.getBooks(params);
+      const data = await api.getBooks(username2, params);
       gridContainer.innerHTML = bookGridHtml(data.books);
       attachGridClickHandlers(gridContainer);
       if (countEl) {
@@ -630,6 +699,7 @@
   async function renderBookDetail(params) {
     const app = document.getElementById("app");
     const bookId = parseInt(params.id);
+    const username2 = getLibraryUsername();
     app.innerHTML = `
         <div class="loading-spinner">
             <div class="spinner-border text-primary" role="status">
@@ -638,8 +708,8 @@
         </div>
     `;
     try {
-      const book = await api.getBook(bookId);
-      renderBook(app, book);
+      const book = await api.getBook(username2, bookId);
+      renderBook(app, book, username2);
     } catch (err) {
       app.innerHTML = `
             <div class="alert alert-danger">
@@ -648,14 +718,40 @@
         `;
     }
   }
-  function renderBook(app, book) {
+  function renderBook(app, book, username2) {
+    const isOwner2 = book.is_owner;
     const coverHtml = book.cover_filename ? `<img src="${api.coverUrl(book.user_id, book.cover_filename)}"
                alt="${escapeHtml2(book.title)}" class="cover-large">` : `<div class="no-cover-large"><i class="bi bi-book"></i></div>`;
     const tagsHtml = (book.tags || []).map((t) => `<span class="badge bg-secondary tag-badge">${escapeHtml2(t)}</span>`).join("");
     const seriesLink = book.series ? `<a href="#/series/${encodeURIComponent(book.series)}">${escapeHtml2(book.series)}</a>${book.series_index ? ` #${book.series_index}` : ""}` : '<span class="text-muted">-</span>';
+    const ratingHtml = ratingStarsHtml(book.rating, isOwner2);
+    const statusHtml = isOwner2 ? `<div class="form-check form-switch">
+               <input class="form-check-input" type="checkbox"
+                      id="read-toggle" ${book.is_read ? "checked" : ""}>
+               <label class="form-check-label" for="read-toggle">
+                   ${book.is_read ? "Read" : "Unread"}
+               </label>
+           </div>` : `<span>${book.is_read ? "Read" : "Unread"}</span>`;
+    const dateVal = book.date_finished ? book.date_finished.split("T")[0] : "";
+    const dateHtml = isOwner2 ? `<input type="date" class="form-control form-control-sm"
+                  id="date-finished" style="width: 200px;"
+                  value="${dateVal}">` : `<span>${dateVal ? formatDate(book.date_finished) : '<span class="text-muted">-</span>'}</span>`;
+    const actionsHtml = isOwner2 ? `<div class="mt-3 d-flex gap-2 flex-wrap">
+               ${book.file_path ? `
+                   <button class="btn btn-outline-primary btn-sm" id="download-btn">
+                       <i class="bi bi-download"></i> Download EPUB
+                   </button>
+                   <button class="btn btn-outline-warning btn-sm" id="kindle-btn">
+                       <i class="bi bi-send"></i> Send to Kindle
+                   </button>
+               ` : ""}
+               <button class="btn btn-outline-danger btn-sm" id="delete-btn">
+                   <i class="bi bi-trash"></i> Delete
+               </button>
+           </div>` : "";
     app.innerHTML = `
         <div class="book-detail">
-            <a href="#/books" class="btn btn-outline-secondary btn-sm mb-3">
+            <a href="#" class="btn btn-outline-secondary btn-sm mb-3" id="back-to-library">
                 <i class="bi bi-arrow-left"></i> Back to Library
             </a>
 
@@ -672,28 +768,16 @@
                             <tr>
                                 <th>Rating</th>
                                 <td id="rating-container">
-                                    ${ratingStarsHtml(book.rating, true)}
+                                    ${ratingHtml}
                                 </td>
                             </tr>
                             <tr>
                                 <th>Status</th>
-                                <td>
-                                    <div class="form-check form-switch">
-                                        <input class="form-check-input" type="checkbox"
-                                               id="read-toggle" ${book.is_read ? "checked" : ""}>
-                                        <label class="form-check-label" for="read-toggle">
-                                            ${book.is_read ? "Read" : "Unread"}
-                                        </label>
-                                    </div>
-                                </td>
+                                <td>${statusHtml}</td>
                             </tr>
                             <tr>
                                 <th>Date Finished</th>
-                                <td>
-                                    <input type="date" class="form-control form-control-sm"
-                                           id="date-finished" style="width: 200px;"
-                                           value="${book.date_finished ? book.date_finished.split("T")[0] : ""}">
-                                </td>
+                                <td>${dateHtml}</td>
                             </tr>
                             <tr>
                                 <th>Series</th>
@@ -718,19 +802,7 @@
                         </tbody>
                     </table>
 
-                    <div class="mt-3 d-flex gap-2 flex-wrap">
-                        ${book.file_path ? `
-                            <button class="btn btn-outline-primary btn-sm" id="download-btn">
-                                <i class="bi bi-download"></i> Download EPUB
-                            </button>
-                            <button class="btn btn-outline-warning btn-sm" id="kindle-btn">
-                                <i class="bi bi-send"></i> Send to Kindle
-                            </button>
-                        ` : ""}
-                        <button class="btn btn-outline-danger btn-sm" id="delete-btn">
-                            <i class="bi bi-trash"></i> Delete
-                        </button>
-                    </div>
+                    ${actionsHtml}
 
                     <div id="action-alert" class="mt-2"></div>
                 </div>
@@ -746,11 +818,16 @@
             ` : ""}
         </div>
     `;
+    document.getElementById("back-to-library").addEventListener("click", (e) => {
+      e.preventDefault();
+      navigateHome();
+    });
+    if (!isOwner2) return;
     attachRatingHandler(
       document.getElementById("rating-container"),
       async (rating) => {
         try {
-          await api.updateBook(book.id, { rating });
+          await api.updateBook(username2, book.id, { rating });
           showAlert("Rating updated", "success");
         } catch (err) {
           showAlert(err.message, "danger");
@@ -769,7 +846,7 @@
           updates.date_finished = today;
           document.getElementById("date-finished").value = today;
         }
-        await api.updateBook(book.id, updates);
+        await api.updateBook(username2, book.id, updates);
         showAlert("Status updated", "success");
       } catch (err) {
         showAlert(err.message, "danger");
@@ -778,7 +855,7 @@
     const dateFinished = document.getElementById("date-finished");
     dateFinished.addEventListener("change", async () => {
       try {
-        await api.updateBook(book.id, {
+        await api.updateBook(username2, book.id, {
           date_finished: dateFinished.value || null
         });
         showAlert("Date updated", "success");
@@ -792,7 +869,7 @@
         downloadBtn.setAttribute("disabled", "true");
         downloadBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Downloading...';
         try {
-          await api.downloadFile(book.id, book.title);
+          await api.downloadFile(username2, book.id, book.title);
         } catch (err) {
           showAlert(err.message, "danger");
         } finally {
@@ -807,7 +884,7 @@
         kindleBtn.setAttribute("disabled", "true");
         kindleBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Sending...';
         try {
-          const result = await api.sendToKindle(book.id);
+          const result = await api.sendToKindle(username2, book.id);
           showAlert(`Sent to ${result.sent_to}`, "success");
         } catch (err) {
           showAlert(err.message, "danger");
@@ -821,8 +898,8 @@
     deleteBtn.addEventListener("click", async () => {
       if (!confirm(`Delete "${book.title}"? This cannot be undone.`)) return;
       try {
-        await api.deleteBook(book.id);
-        navigate("#/books");
+        await api.deleteBook(username2, book.id);
+        navigateHome();
       } catch (err) {
         showAlert(err.message, "danger");
       }
@@ -857,6 +934,7 @@
   // src/pages/series-list.ts
   async function renderSeriesList() {
     const app = document.getElementById("app");
+    const username2 = getLibraryUsername();
     app.innerHTML = `
         <div class="loading-spinner">
             <div class="spinner-border text-primary" role="status">
@@ -865,7 +943,7 @@
         </div>
     `;
     try {
-      const data = await api.getSeries();
+      const data = await api.getSeries(username2);
       const series = data.series;
       if (series.length === 0) {
         app.innerHTML = `
@@ -929,6 +1007,7 @@
   // src/pages/series-view.ts
   async function renderSeriesView(params) {
     const app = document.getElementById("app");
+    const username2 = getLibraryUsername();
     const seriesName = params.name;
     app.innerHTML = `
         <div class="loading-spinner">
@@ -938,7 +1017,7 @@
         </div>
     `;
     try {
-      const data = await api.getSeriesBooks(seriesName);
+      const data = await api.getSeriesBooks(username2, seriesName);
       const books = data.books;
       const firstUnreadIdx = books.findIndex((b) => !b.is_read);
       let html = `
@@ -1000,6 +1079,11 @@
   // src/pages/add-book.ts
   function renderAddBook() {
     const app = document.getElementById("app");
+    const username2 = getLibraryUsername();
+    if (!isOwner()) {
+      navigateHome();
+      return;
+    }
     app.innerHTML = `
         <div style="max-width: 700px; margin: 0 auto;">
             <h4 class="mb-3">Add Book</h4>
@@ -1083,7 +1167,7 @@
         const token = getToken();
         const headers = {};
         if (token) headers["Authorization"] = `Bearer ${token}`;
-        const resp = await fetch("/api/metadata/extract", {
+        const resp = await fetch(`/api/${username2}/metadata/extract`, {
           method: "POST",
           headers,
           body: formData
@@ -1104,7 +1188,7 @@
       const resultsDiv = document.getElementById("meta-results");
       resultsDiv.innerHTML = '<div class="spinner-border spinner-border-sm"></div>';
       try {
-        const data = await api.searchMetadata(query);
+        const data = await api.searchMetadata(username2, query);
         if (!data.results.length) {
           resultsDiv.innerHTML = '<p class="text-muted">No results found</p>';
           return;
@@ -1147,7 +1231,7 @@
         if (authors) metadata.authors = authors;
         if (series) metadata.series = series;
         if (seriesIndex) metadata.series_index = parseFloat(seriesIndex);
-        const book = await api.uploadBook(file, metadata);
+        const book = await api.uploadBook(username2, file, metadata);
         navigate(`#/book/${book.id}`);
       } catch (err) {
         showError(err.message);
@@ -1181,22 +1265,19 @@
   }
 
   // src/main.ts
-  function requireAuth(handler) {
-    return (params) => {
-      if (!getToken()) {
-        window.location.hash = "#/login";
-        return;
-      }
-      handler(params);
-    };
+  var username = getLibraryUsername();
+  if (!username) {
+    renderLogin();
+    bootstrapAuth();
+    updateNavbar();
+  } else {
+    setDefaultRoute(() => renderLibrary());
+    addRoute("/book/:id", (p) => renderBookDetail(p));
+    addRoute("/series", () => renderSeriesList());
+    addRoute("/series/:name", (p) => renderSeriesView(p));
+    addRoute("/add", () => renderAddBook());
+    bootstrapAuth();
+    updateNavbar();
+    startRouter();
   }
-  addRoute("/login", () => renderLogin());
-  addRoute("/books", requireAuth(() => renderLibrary()));
-  addRoute("/book/:id", requireAuth((p) => renderBookDetail(p)));
-  addRoute("/series", requireAuth(() => renderSeriesList()));
-  addRoute("/series/:name", requireAuth((p) => renderSeriesView(p)));
-  addRoute("/add", requireAuth(() => renderAddBook()));
-  bootstrapAuth();
-  updateNavbar();
-  startRouter();
 })();

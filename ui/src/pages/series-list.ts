@@ -1,8 +1,11 @@
 import { api } from '../api';
+import { getLibraryUsername } from '../context';
 import { navigate } from '../router';
 
 export async function renderSeriesList(): Promise<void> {
     const app = document.getElementById('app')!;
+    const username = getLibraryUsername()!;
+
     app.innerHTML = `
         <div class="loading-spinner">
             <div class="spinner-border text-primary" role="status">
@@ -12,7 +15,7 @@ export async function renderSeriesList(): Promise<void> {
     `;
 
     try {
-        const data = await api.getSeries();
+        const data = await api.getSeries(username);
         const series: any[] = data.series;
 
         if (series.length === 0) {

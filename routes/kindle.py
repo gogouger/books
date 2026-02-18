@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..helpers import db
-from ..helpers.auth import require_user
+from ..helpers.auth import require_owner
 from ..helpers.db import DATA_DIR
 from ..helpers.email import send_to_kindle
 
@@ -20,7 +20,7 @@ class KindleSendRequest(BaseModel):
 async def send_book_to_kindle(
     book_id: int,
     req: KindleSendRequest | None = None,
-    payload: require_user = None,
+    payload: require_owner = None,
 ) -> dict:
     user_id = payload["user_id"]
     book = db.get_book(book_id, user_id)

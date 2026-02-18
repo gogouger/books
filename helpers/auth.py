@@ -2,10 +2,10 @@
 
 import json
 import logging
-import os
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Request, status
+from decouple import config
+from fastapi import Depends, HTTPException, Path, Request, status
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2 import id_token
 
@@ -13,8 +13,8 @@ from .db import DATA_DIR, get_user_by_username
 
 log = logging.getLogger(__name__)
 
-SECURE = os.getenv("BOOKS_SECURE", "false").lower() == "true"
-GOOGLE_CLIENT_ID = os.getenv("BOOKS_GOOGLE_CLIENT_ID", "")
+SECURE = config("BOOKS_SECURE", default="false").lower() == "true"
+GOOGLE_CLIENT_ID = config("BOOKS_GOOGLE_CLIENT_ID", default="")
 
 _users_path = DATA_DIR / "users.json"
 _users_cache: dict[str, str] | None = None
@@ -83,4 +83,60 @@ def _get_user(request: Request) -> dict:
     return {"user_id": user["id"], "username": user["username"]}
 
 
+def _optional_user(request: Request) -> dict | None:
+    """Like _get_user but returns None instead of raising.
+
+    Used by read-only routes so anonymous visitors can browse.
+    """
+    try:
+        return _get_user(request)
+    except HTTPException:
+        return None
+
+
+def _resolve_library_owner(
+    username: str = Path(...),
+) -> dict:
+    """Resolve {username} path param to a user dict.
+
+    Raises:
+        HTTPException: 404 if username not found.
+    """
+    user = get_user_by_username(username)
+    if user is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "User not found"
+        )
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "display_name": user["display_name"],
+    }
+
+
+def _require_owner(
+    request: Request,
+    username: str = Path(...),
+) -> dict:
+    """Authenticate user and verify they own this library.
+
+    Returns:
+        Dict with user_id and username keys.
+
+    Raises:
+        HTTPException: 401 if not authenticated, 403 if not owner.
+    """
+    user = _get_user(request)
+    owner = _resolve_library_owner(username)
+    if user["user_id"] != owner["id"]:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Not your library",
+        )
+    return user
+
+
 require_user = Annotated[dict, Depends(_get_user)]
+optional_user = Annotated[dict | None, Depends(_optional_user)]
+library_owner = Annotated[dict, Depends(_resolve_library_owner)]
+require_owner = Annotated[dict, Depends(_require_owner)]

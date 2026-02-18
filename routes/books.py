@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..helpers import db
-from ..helpers.auth import require_user
+from ..helpers.auth import library_owner, optional_user, require_owner
 from ..helpers.metadata import (
     extract_epub_metadata,
     search_google_books,
@@ -47,9 +47,22 @@ class MetadataSearchRequest(BaseModel):
     source: str = "google"
 
 
+def _is_owner(
+    viewer: dict | None, owner: dict
+) -> bool:
+    """Check if the viewer is the library owner."""
+    if viewer is None:
+        return False
+    return viewer["user_id"] == owner["id"]
+
+
+# --- Read-only routes (anonymous or authenticated) ---
+
+
 @router.get("/books")
 def list_books(
-    payload: require_user,
+    owner: library_owner,
+    viewer: optional_user,
     q: str | None = None,
     series: str | None = None,
     is_read: int | None = None,
@@ -60,7 +73,7 @@ def list_books(
     limit: int = Query(default=50, le=200),
     offset: int = 0,
 ) -> dict:
-    user_id = payload["user_id"]
+    user_id = owner["id"]
     books = db.get_books(
         user_id,
         q=q,
@@ -81,26 +94,69 @@ def list_books(
         min_rating=min_rating,
         max_rating=max_rating,
     )
-    return {"books": books, "total": total}
+    return {
+        "books": books,
+        "total": total,
+        "is_owner": _is_owner(viewer, owner),
+        "library_owner": {
+            "username": owner["username"],
+            "display_name": owner["display_name"],
+        },
+    }
 
 
 @router.get("/books/{book_id}")
 def get_book(
     book_id: int,
-    payload: require_user,
+    owner: library_owner,
+    viewer: optional_user,
 ) -> dict:
-    book = db.get_book(book_id, payload["user_id"])
+    book = db.get_book(book_id, owner["id"])
     if book is None:
         raise HTTPException(
             status_code=404, detail="Book not found"
         )
+    book["is_owner"] = _is_owner(viewer, owner)
+    book["library_owner"] = {
+        "username": owner["username"],
+        "display_name": owner["display_name"],
+    }
     return book
+
+
+@router.get("/books/{book_id}/cover")
+def get_cover(
+    book_id: int,
+    owner: library_owner,
+    _viewer: optional_user,
+) -> FileResponse:
+    book = db.get_book(book_id, owner["id"])
+    if book is None or not book.get("cover_filename"):
+        raise HTTPException(
+            status_code=404, detail="Cover not found"
+        )
+    cover_path = (
+        DATA_DIR
+        / "covers"
+        / str(owner["id"])
+        / book["cover_filename"]
+    )
+    if not cover_path.exists():
+        raise HTTPException(
+            status_code=404, detail="Cover file missing"
+        )
+    return FileResponse(
+        str(cover_path), media_type="image/jpeg"
+    )
+
+
+# --- Owner-only routes ---
 
 
 @router.post("/books")
 async def add_book(
     file: UploadFile,
-    payload: require_user,
+    payload: require_owner,
     title: str | None = None,
     authors: str | None = None,
     series: str | None = None,
@@ -178,7 +234,7 @@ async def add_book(
 def update_book(
     book_id: int,
     updates: BookUpdate,
-    payload: require_user,
+    payload: require_owner,
 ) -> dict:
     user_id = payload["user_id"]
     update_data = updates.model_dump(exclude_none=True)
@@ -197,7 +253,7 @@ def update_book(
 @router.delete("/books/{book_id}")
 def delete_book(
     book_id: int,
-    payload: require_user,
+    payload: require_owner,
 ) -> dict:
     user_id = payload["user_id"]
     book = db.get_book(book_id, user_id)
@@ -230,35 +286,10 @@ def delete_book(
     return {"success": True}
 
 
-@router.get("/books/{book_id}/cover")
-def get_cover(
-    book_id: int,
-    payload: require_user,
-) -> FileResponse:
-    book = db.get_book(book_id, payload["user_id"])
-    if book is None or not book.get("cover_filename"):
-        raise HTTPException(
-            status_code=404, detail="Cover not found"
-        )
-    cover_path = (
-        DATA_DIR
-        / "covers"
-        / str(payload["user_id"])
-        / book["cover_filename"]
-    )
-    if not cover_path.exists():
-        raise HTTPException(
-            status_code=404, detail="Cover file missing"
-        )
-    return FileResponse(
-        str(cover_path), media_type="image/jpeg"
-    )
-
-
 @router.get("/books/{book_id}/file")
 def get_file(
     book_id: int,
-    payload: require_user,
+    payload: require_owner,
 ) -> FileResponse:
     book = db.get_book(book_id, payload["user_id"])
     if book is None or not book.get("file_path"):
@@ -285,7 +316,7 @@ def get_file(
 @router.post("/metadata/search")
 async def search_metadata(
     req: MetadataSearchRequest,
-    payload: require_user,
+    _payload: require_owner,
 ) -> dict:
     if req.source == "openlibrary":
         results = await search_open_library(req.query)
@@ -297,7 +328,7 @@ async def search_metadata(
 @router.post("/metadata/extract")
 async def extract_metadata(
     file: UploadFile,
-    payload: require_user,
+    _payload: require_owner,
 ) -> dict:
     temp_path = DATA_DIR / f"temp_{uuid.uuid4()}.epub"
     try:

@@ -1,4 +1,5 @@
 import { api } from '../api';
+import { getLibraryUsername } from '../context';
 import { bookGridHtml, attachGridClickHandlers } from '../components/book-grid';
 import {
     filterBarHtml,
@@ -32,6 +33,7 @@ export async function renderLibrary(): Promise<void> {
 }
 
 async function loadBooks(): Promise<void> {
+    const username = getLibraryUsername()!;
     const gridContainer = document.getElementById('book-grid-container')!;
     const paginationContainer = document.getElementById('pagination-container')!;
     const countEl = document.getElementById('book-count');
@@ -54,7 +56,7 @@ async function loadBooks(): Promise<void> {
         if (currentState.q) params.q = currentState.q;
         if (currentState.is_read !== '') params.is_read = currentState.is_read;
 
-        const data = await api.getBooks(params);
+        const data = await api.getBooks(username, params);
         gridContainer.innerHTML = bookGridHtml(data.books);
         attachGridClickHandlers(gridContainer);
 

@@ -1,5 +1,4 @@
 import { apiFetch } from './api';
-import { navigate } from './router';
 import { updateNavbar } from './pages/login';
 
 declare const google: any;
@@ -29,7 +28,7 @@ function scheduleTokenRefresh(token: string): void {
     const timeUntilExpiry = exp * 1000 - Date.now() - 5 * 60 * 1000;
     if (timeUntilExpiry <= 0) {
         clearAuth();
-        window.location.hash = '#/login';
+        window.location.href = '/';
         return;
     }
     tokenRefreshTimeout = setTimeout(() => { showLoginPrompt(); }, timeUntilExpiry);
@@ -87,8 +86,8 @@ async function initializeGoogleSignIn(): Promise<void> {
             try {
                 const me = await apiFetch('/auth/me');
                 setUser(me);
-                updateNavbar();
-                navigate('#/books');
+                // Redirect to the user's own library (full page nav)
+                window.location.href = `/${me.username}/`;
             } catch (err: any) {
                 clearAuth();
                 const errorEl = document.getElementById('login-error');

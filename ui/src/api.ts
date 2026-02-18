@@ -26,14 +26,12 @@ export async function apiFetch(
         const refreshed = await showLoginPrompt();
         if (!refreshed) {
             clearAuth();
-            window.location.hash = '#/login';
+            window.location.href = '/';
         }
         throw new Error('Not authenticated');
     }
 
     if (resp.status === 403) {
-        clearAuth();
-        window.location.hash = '#/login';
         throw new Error('Not authorized');
     }
 
@@ -66,7 +64,7 @@ async function apiFetchRaw(
         const refreshed = await showLoginPrompt();
         if (!refreshed) {
             clearAuth();
-            window.location.hash = '#/login';
+            window.location.href = '/';
         }
         throw new Error('Not authenticated');
     }
@@ -90,54 +88,54 @@ export const api = {
         });
     },
 
-    async getBooks(params: Record<string, any> = {}): Promise<any> {
+    async getBooks(username: string, params: Record<string, any> = {}): Promise<any> {
         const qs = new URLSearchParams();
         for (const [k, v] of Object.entries(params)) {
             if (v !== undefined && v !== null && v !== '') {
                 qs.set(k, String(v));
             }
         }
-        return apiFetch(`/books?${qs.toString()}`);
+        return apiFetch(`/${username}/books?${qs.toString()}`);
     },
 
-    async getBook(id: number): Promise<any> {
-        return apiFetch(`/books/${id}`);
+    async getBook(username: string, id: number): Promise<any> {
+        return apiFetch(`/${username}/books/${id}`);
     },
 
-    async updateBook(id: number, updates: Record<string, any>): Promise<any> {
-        return apiFetch(`/books/${id}`, {
+    async updateBook(username: string, id: number, updates: Record<string, any>): Promise<any> {
+        return apiFetch(`/${username}/books/${id}`, {
             method: 'PATCH',
             body: JSON.stringify(updates),
         });
     },
 
-    async deleteBook(id: number): Promise<any> {
-        return apiFetch(`/books/${id}`, { method: 'DELETE' });
+    async deleteBook(username: string, id: number): Promise<any> {
+        return apiFetch(`/${username}/books/${id}`, { method: 'DELETE' });
     },
 
-    async sendToKindle(bookId: number, email?: string): Promise<any> {
-        return apiFetch(`/books/${bookId}/kindle`, {
+    async sendToKindle(username: string, bookId: number, email?: string): Promise<any> {
+        return apiFetch(`/${username}/books/${bookId}/kindle`, {
             method: 'POST',
             body: JSON.stringify(email ? { email } : {}),
         });
     },
 
-    async getSeries(): Promise<any> {
-        return apiFetch('/series');
+    async getSeries(username: string): Promise<any> {
+        return apiFetch(`/${username}/series`);
     },
 
-    async getSeriesBooks(name: string): Promise<any> {
-        return apiFetch(`/series/${encodeURIComponent(name)}`);
+    async getSeriesBooks(username: string, name: string): Promise<any> {
+        return apiFetch(`/${username}/series/${encodeURIComponent(name)}`);
     },
 
-    async searchMetadata(query: string, source: string = 'google'): Promise<any> {
-        return apiFetch('/metadata/search', {
+    async searchMetadata(username: string, query: string, source: string = 'google'): Promise<any> {
+        return apiFetch(`/${username}/metadata/search`, {
             method: 'POST',
             body: JSON.stringify({ query, source }),
         });
     },
 
-    async uploadBook(file: File, metadata?: Record<string, any>): Promise<any> {
+    async uploadBook(username: string, file: File, metadata?: Record<string, any>): Promise<any> {
         const formData = new FormData();
         formData.append('file', file);
         const qs = new URLSearchParams();
@@ -152,7 +150,7 @@ export const api = {
         const headers: Record<string, string> = {};
         if (token) headers['Authorization'] = `Bearer ${token}`;
 
-        const resp = await fetch(`${API_BASE}/books?${qs.toString()}`, {
+        const resp = await fetch(`${API_BASE}/${username}/books?${qs.toString()}`, {
             method: 'POST',
             headers,
             body: formData,
@@ -168,8 +166,8 @@ export const api = {
         return `/covers/${userId}/${coverFilename}`;
     },
 
-    async downloadFile(bookId: number, title: string): Promise<void> {
-        const resp = await apiFetchRaw(`/books/${bookId}/file`);
+    async downloadFile(username: string, bookId: number, title: string): Promise<void> {
+        const resp = await apiFetchRaw(`/${username}/books/${bookId}/file`);
         const blob = await resp.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
