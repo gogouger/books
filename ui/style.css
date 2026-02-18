@@ -1,0 +1,241 @@
+:root {
+    --cover-width: 160px;
+    --cover-height: 240px;
+    --cover-width-lg: 250px;
+    --cover-height-lg: 375px;
+}
+
+body {
+    background-color: #f8f9fa;
+}
+
+/* Book cards */
+.book-card {
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    border: none;
+    border-radius: 8px;
+    overflow: hidden;
+    height: 100%;
+}
+
+.book-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+.book-card .cover-container {
+    width: 100%;
+    height: var(--cover-height);
+    overflow: hidden;
+    background-color: #e9ecef;
+    position: relative;
+}
+
+.book-card .cover-container img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.book-card .no-cover {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #6c757d;
+    font-size: 3rem;
+}
+
+.book-card .read-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 0.7rem;
+}
+
+.book-card .card-body {
+    padding: 0.75rem;
+}
+
+.book-card .card-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.book-card .card-author {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-bottom: 0.25rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.book-card .card-series {
+    font-size: 0.75rem;
+    color: #0d6efd;
+    margin-bottom: 0.25rem;
+}
+
+/* Rating stars */
+.rating-stars {
+    display: inline-flex;
+    gap: 2px;
+    font-size: 0.9rem;
+}
+
+.rating-stars .star {
+    color: #ddd;
+    cursor: default;
+}
+
+.rating-stars .star.filled {
+    color: #ffc107;
+}
+
+.rating-stars .star.half {
+    position: relative;
+    color: #ddd;
+}
+
+.rating-stars .star.half::before {
+    content: "\f586";
+    font-family: "bootstrap-icons";
+    position: absolute;
+    left: 0;
+    color: #ffc107;
+    overflow: hidden;
+    width: 50%;
+}
+
+.rating-stars.editable .star {
+    cursor: pointer;
+    transition: color 0.1s;
+}
+
+.rating-stars.editable .star:hover {
+    color: #ffca2c;
+}
+
+/* Book grid */
+.book-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 1rem;
+}
+
+@media (max-width: 576px) {
+    .book-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 0.75rem;
+    }
+
+    .book-card .cover-container {
+        height: 200px;
+    }
+}
+
+/* Filter bar */
+.filter-bar {
+    background: white;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.filter-bar .form-control,
+.filter-bar .form-select {
+    font-size: 0.9rem;
+}
+
+/* Book detail */
+.book-detail {
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.book-detail .cover-large {
+    width: var(--cover-width-lg);
+    height: var(--cover-height-lg);
+    object-fit: cover;
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.book-detail .no-cover-large {
+    width: var(--cover-width-lg);
+    height: var(--cover-height-lg);
+    background-color: #e9ecef;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #6c757d;
+    font-size: 5rem;
+}
+
+.book-detail .metadata-table th {
+    width: 120px;
+    font-weight: 500;
+    color: #6c757d;
+    border: none;
+}
+
+.book-detail .metadata-table td {
+    border: none;
+}
+
+/* Series cards */
+.series-card {
+    transition: transform 0.15s ease;
+    cursor: pointer;
+}
+
+.series-card:hover {
+    transform: translateY(-2px);
+}
+
+.series-progress {
+    height: 6px;
+    border-radius: 3px;
+}
+
+/* Next unread highlight */
+.next-unread {
+    border-left: 4px solid #0d6efd;
+    background-color: rgba(13, 110, 253, 0.05);
+}
+
+/* Login */
+.login-container {
+    max-width: 400px;
+    margin: 100px auto;
+}
+
+/* Tags */
+.tag-badge {
+    font-size: 0.75rem;
+    font-weight: 400;
+    margin-right: 0.25rem;
+    margin-bottom: 0.25rem;
+}
+
+/* Loading */
+.loading-spinner {
+    display: flex;
+    justify-content: center;
+    padding: 3rem;
+}
+
+/* Pagination */
+.pagination-info {
+    font-size: 0.85rem;
+    color: #6c757d;
+}
