@@ -1,0 +1,22 @@
+[project]
+name = "books"
+version = "0.1.0"
+description = "Personal book library management"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "gunicorn>=23.0",
+    "google-auth>=2.0",
+    "requests>=2.32",
+    "python-decouple",
+    "python-multipart",
+    "ebooklib",
+    "aiosmtplib",
+    "httpx",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -2,7 +2,7 @@
 
 ## 0. Git init
 
-- [ ] Get into git. Don't store books themselves. Metadata on books can also
+- [x] Get into git. Don't store books themselves. Metadata on books can also
   be separate. Project should be a git project, though.
 
 ## 1. Public library URLs (architecture rework)
