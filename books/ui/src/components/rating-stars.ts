@@ -7,8 +7,6 @@ export function ratingStarsHtml(
     for (let i = 1; i <= 5; i++) {
         if (r >= i) {
             html += `<i class="bi bi-star-fill star filled" data-value="${i}"></i>`;
-        } else if (r >= i - 0.5) {
-            html += `<i class="bi bi-star-half star filled" data-value="${i - 0.5}"></i>`;
         } else {
             html += `<i class="bi bi-star star" data-value="${i}"></i>`;
         }
@@ -28,20 +26,13 @@ export function attachRatingHandler(
         const target = e.target as HTMLElement;
         if (!target.classList.contains('star')) return;
 
-        const value = parseFloat(target.dataset.value || '0');
-        const currentRating = parseFloat(
+        const value = parseInt(target.dataset.value || '0');
+        const currentRating = parseInt(
             starsDiv.getAttribute('data-rating') || '0'
         );
 
-        // Click same star = toggle half star / clear
-        let newRating: number;
-        if (value === currentRating) {
-            newRating = value - 0.5;
-        } else if (value - 0.5 === currentRating) {
-            newRating = 0;
-        } else {
-            newRating = value;
-        }
+        // Click same star = clear to 0
+        const newRating = value === currentRating ? 0 : value;
 
         starsDiv.setAttribute('data-rating', String(newRating));
         starsDiv.innerHTML = '';
@@ -53,5 +44,40 @@ export function attachRatingHandler(
         }
 
         callback(newRating);
+    });
+}
+
+export function favoriteButtonHtml(
+    isFavorite: boolean,
+    editable: boolean
+): string {
+    const icon = isFavorite ? 'bi-heart-fill' : 'bi-heart';
+    const activeClass = isFavorite ? ' active' : '';
+    const editableClass = editable ? ' editable' : '';
+    return `<span class="favorite-btn${activeClass}${editableClass}" data-favorite="${isFavorite}">
+        <i class="bi ${icon}"></i>
+    </span>`;
+}
+
+export function attachFavoriteHandler(
+    container: HTMLElement,
+    callback: (isFavorite: boolean) => void
+): void {
+    const btn = container.querySelector('.favorite-btn.editable');
+    if (!btn) return;
+
+    btn.addEventListener('click', () => {
+        const current = btn.getAttribute('data-favorite') === 'true';
+        const newVal = !current;
+        btn.setAttribute('data-favorite', String(newVal));
+        const icon = btn.querySelector('i')!;
+        if (newVal) {
+            icon.className = 'bi bi-heart-fill';
+            btn.classList.add('active');
+        } else {
+            icon.className = 'bi bi-heart';
+            btn.classList.remove('active');
+        }
+        callback(newVal);
     });
 }

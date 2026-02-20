@@ -1,10 +1,55 @@
 import { api } from '../api';
 import { getLibraryUsername } from '../context';
 import { navigate } from '../router';
+import {
+    filterBarHtml,
+    attachFilterHandlers,
+    FilterState,
+    FilterOption,
+    SortOption,
+} from '../components/filter-bar';
+
+let cachedSeries: any[] | null = null;
+let savedScrollY = 0;
+let scrollListener: (() => void) | null = null;
+let showHidden = false;
+
+let currentState: FilterState = {
+    q: '',
+    filter: '',
+    sort: 'title',
+    order: 'asc',
+};
+
+const SERIES_FILTER_OPTIONS: FilterOption[] = [
+    { value: '', label: 'All series' },
+    { value: '_hr1', label: '', hr: true },
+    { value: 'complete', label: 'Complete' },
+    { value: 'in_progress', label: 'In progress' },
+    { value: 'unread', label: 'Unread' },
+];
+
+const SERIES_SORT_OPTIONS: SortOption[] = [
+    { value: 'title', label: 'Title' },
+    { value: 'author', label: 'Author' },
+    { value: 'rating', label: 'Rating' },
+    { value: 'books', label: 'Books' },
+];
+
+export function invalidateSeriesCache(): void {
+    cachedSeries = null;
+}
 
 export async function renderSeriesList(): Promise<void> {
     const app = document.getElementById('app')!;
     const username = getLibraryUsername()!;
+
+    if (cachedSeries) {
+        renderPage(app);
+        setupScrollTracking();
+        requestAnimationFrame(() => window.scrollTo(0, savedScrollY));
+        return;
+    }
 
     app.innerHTML = `
         <div class="loading-spinner">
@@ -15,61 +60,11 @@ export async function renderSeriesList(): Promise<void> {
     `;
 
     try {
-        const data = await api.getSeries(username);
-        const series: any[] = data.series;
-
-        if (series.length === 0) {
-            app.innerHTML = `
-                <div class="text-center text-muted py-5">
-                    <i class="bi bi-collection" style="font-size: 3rem;"></i>
-                    <p class="mt-2">No series found</p>
-                </div>
-            `;
-            return;
-        }
-
-        let html = `<h4 class="mb-3">${series.length} Series</h4>`;
-        html += '<div class="row g-3">';
-
-        for (const s of series) {
-            const pct = s.total_books > 0
-                ? Math.round((s.read_count / s.total_books) * 100)
-                : 0;
-            const avgRating = s.avg_rating
-                ? s.avg_rating.toFixed(1)
-                : '-';
-
-            html += `
-                <div class="col-12 col-sm-6 col-md-4 col-lg-3">
-                    <div class="card series-card h-100" data-series="${escapeAttr(s.series)}">
-                        <div class="card-body">
-                            <h6 class="card-title mb-1">${escapeHtml(s.series)}</h6>
-                            <div class="d-flex justify-content-between text-muted small mb-2">
-                                <span>${s.total_books} book${s.total_books !== 1 ? 's' : ''}</span>
-                                <span>${s.read_count}/${s.total_books} read</span>
-                            </div>
-                            <div class="progress series-progress mb-2">
-                                <div class="progress-bar bg-success" style="width: ${pct}%"></div>
-                            </div>
-                            <div class="text-muted small">
-                                Avg rating: ${avgRating}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-
-        html += '</div>';
-        app.innerHTML = html;
-
-        // Attach click handlers
-        app.querySelectorAll('.series-card').forEach(card => {
-            card.addEventListener('click', () => {
-                const name = card.getAttribute('data-series');
-                if (name) navigate(`#/series/${encodeURIComponent(name)}`);
-            });
-        });
+        const data = await api.getSeries(username, showHidden);
+        cachedSeries = data.series;
+        savedScrollY = 0;
+        renderPage(app);
+        setupScrollTracking();
     } catch (err: any) {
         app.innerHTML = `
             <div class="alert alert-danger">
@@ -79,12 +74,194 @@ export async function renderSeriesList(): Promise<void> {
     }
 }
 
+function renderPage(app: HTMLElement): void {
+    app.innerHTML =
+        filterBarHtml(currentState, SERIES_FILTER_OPTIONS, SERIES_SORT_OPTIONS) +
+        `<div class="mb-3">
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="show-hidden-toggle"
+                       ${showHidden ? 'checked' : ''}>
+                <label class="form-check-label text-muted small" for="show-hidden-toggle">
+                    Show hidden series
+                </label>
+            </div>
+        </div>` +
+        '<div id="series-grid-container"></div>';
+
+    attachFilterHandlers(app, (state) => {
+        currentState = state;
+        applyFilters();
+    });
+
+    const toggle = app.querySelector('#show-hidden-toggle') as HTMLInputElement;
+    if (toggle) {
+        toggle.addEventListener('change', () => {
+            showHidden = toggle.checked;
+            cachedSeries = null;
+            renderSeriesList();
+        });
+    }
+
+    applyFilters();
+}
+
+function applyFilters(): void {
+    if (!cachedSeries) return;
+
+    let filtered = cachedSeries;
+
+    // Search: match against series name and authors
+    if (currentState.q) {
+        const q = currentState.q.toLowerCase();
+        filtered = filtered.filter(s =>
+            s.series.toLowerCase().includes(q) ||
+            (s.authors && s.authors.toLowerCase().includes(q))
+        );
+    }
+
+    // Filter dropdown
+    const f = currentState.filter;
+    if (f === 'complete') {
+        filtered = filtered.filter(s => s.read_count === s.total_books);
+    } else if (f === 'in_progress') {
+        filtered = filtered.filter(s => s.reading_count > 0);
+    } else if (f === 'unread') {
+        filtered = filtered.filter(s => s.unread_count > 0);
+    }
+
+    // Sort
+    const desc = currentState.order === 'desc' ? -1 : 1;
+    const sort = currentState.sort;
+    filtered = [...filtered].sort((a, b) => {
+        if (sort === 'author') {
+            const aa = (a.author_sort || '').toLowerCase();
+            const bb = (b.author_sort || '').toLowerCase();
+            return aa < bb ? -1 * desc : aa > bb ? 1 * desc : 0;
+        } else if (sort === 'rating') {
+            const aa = a.avg_rating ?? -1;
+            const bb = b.avg_rating ?? -1;
+            return (aa - bb) * desc;
+        } else if (sort === 'books') {
+            return (a.total_books - b.total_books) * desc;
+        } else {
+            // title (default)
+            const aa = a.series.toLowerCase();
+            const bb = b.series.toLowerCase();
+            return aa < bb ? -1 * desc : aa > bb ? 1 * desc : 0;
+        }
+    });
+
+    // Update count
+    const countEl = document.getElementById('book-count');
+    if (countEl) {
+        countEl.textContent = `${filtered.length} series`;
+    }
+
+    renderSeriesGrid(
+        document.getElementById('series-grid-container')!,
+        filtered,
+    );
+}
+
+function renderSeriesGrid(container: HTMLElement, series: any[]): void {
+    if (series.length === 0) {
+        container.innerHTML = `
+            <div class="text-center text-muted py-5">
+                <i class="bi bi-collection" style="font-size: 3rem;"></i>
+                <p class="mt-2">No series found</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '<div class="row g-3">';
+
+    for (const s of series) {
+        const avgRating = s.avg_rating
+            ? Math.round(s.avg_rating).toString()
+            : '-';
+
+        const notOwnedCount = s.not_owned_count || 0;
+        const completionClass = s.read_count === s.total_books
+            ? ' series-card-complete'
+            : s.read_count > 0
+                ? ' series-card-in-progress'
+                : '';
+        const monitoredClass = s.monitored === 0 ? ' series-card-hidden' : '';
+        const notOwnedLabel = notOwnedCount > 0
+            ? ` <span class="text-danger">${notOwnedCount} not owned</span>`
+            : '';
+
+        const segmentsHtml = renderSegmentedBar(
+            s.status_seq || '', s.owned_seq || ''
+        );
+
+        const authorHtml = s.authors
+            ? `<div class="text-muted small">${escapeHtml(s.authors)}</div>`
+            : '';
+
+        html += `
+            <div class="col-12 col-sm-6 col-md-4 col-lg-3">
+                <div class="card series-card${completionClass}${monitoredClass} h-100" data-series-id="${s.series_link_id}">
+                    <div class="card-body">
+                        <h6 class="card-title mb-1">${escapeHtml(s.series)}</h6>
+                        ${authorHtml}
+                        <div class="d-flex justify-content-between text-muted small mb-2">
+                            <span>${s.total_books} book${s.total_books !== 1 ? 's' : ''}</span>
+                            <span>${s.read_count}/${s.total_books} read${notOwnedLabel}</span>
+                        </div>
+                        ${segmentsHtml}
+                        <div class="text-muted small mt-2">
+                            Avg rating: ${avgRating}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    html += '</div>';
+    container.innerHTML = html;
+
+    // Attach click handlers
+    container.querySelectorAll('.series-card').forEach(card => {
+        card.addEventListener('click', () => {
+            const id = card.getAttribute('data-series-id');
+            if (id) navigate(`#/series/${id}`);
+        });
+    });
+}
+
+function setupScrollTracking(): void {
+    if (scrollListener) {
+        window.removeEventListener('scroll', scrollListener);
+    }
+    scrollListener = () => {
+        if (document.getElementById('series-grid-container')) {
+            savedScrollY = window.scrollY;
+        }
+    };
+    window.addEventListener('scroll', scrollListener, { passive: true });
+}
+
+const STATUS_CLASS: Record<string, string> = {
+    r: 'segment-read', b: 'segment-reading', u: 'segment-unread',
+};
+
+function renderSegmentedBar(
+    statusSeq: string, ownedSeq: string
+): string {
+    const segments: string[] = [];
+    for (let i = 0; i < statusSeq.length; i++) {
+        const cls = STATUS_CLASS[statusSeq[i]] || 'segment-unread';
+        const owned = ownedSeq[i] !== '0' ? '' : ' segment-not-owned';
+        segments.push(`<div class="series-segment ${cls}${owned}"></div>`);
+    }
+    return `<div class="series-segments">${segments.join('')}</div>`;
+}
+
 function escapeHtml(text: string): string {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
-}
-
-function escapeAttr(text: string): string {
-    return text.replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }

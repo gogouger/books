@@ -15,6 +15,7 @@ dependencies = [
     "ebooklib",
     "aiosmtplib",
     "httpx",
+    "bcrypt>=4.0",
 ]
 
 [build-system]

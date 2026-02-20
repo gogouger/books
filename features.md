@@ -7,7 +7,7 @@
 
 ## 1. Public library URLs (architecture rework)
 
-- [ ] Rework to be `books.mclauthlin.com/<library>` with features gated behind
+- [x] Rework to be `books.mclauthlin.com/<library>` with features gated behind
   login. Not logged in should be able to see the books, ratings, etc, just not
   make any edits (stars, email the book, search for a new book, etc).
 
@@ -17,7 +17,7 @@ needs conditional rendering to hide mutation controls for guests.
 
 ## 2. Reading status enum (prep for KOReader)
 
-- [ ] Migrate `is_read` (0/1) to a `reading_status` field: unread / reading /
+- [x] Migrate `is_read` (0/1) to a `reading_status` field: unread / reading /
   read. Add `date_started`, `pages_read`, `total_pages` columns.
 
 Future: KOReader lua script on Kobo will POST reading progress (currently
@@ -26,56 +26,60 @@ token-based auth for device API since Kobo can't do browser OAuth.
 
 ## 3. Rating system rethink
 
-- [ ] The real scale is 3-5 with 0.5 increments (5 tiers). 1 and 2 are rarely
-  used. 3 = fun, 4 = really enjoyed, 4.5 = great, 5 = one of the best ever.
-  Investigate a better system -- maybe fewer tiers with meaningful labels, or
-  keep numeric but compress the range. Decide before building more UI around
-  ratings. Also matters for KOReader rate-on-finish flow.
+- [x] Replaced 0-5 half-star scale with 1-5 integer ratings + `is_favorite`
+  boolean. Migration truncates half-stars to integers, converts existing 5.0
+  books to favorites (except The Expanse and The Foreworld Saga overrides).
+  UI removes half-star logic, adds heart icon for favorites on cards/detail/
+  series views, and a favorites filter toggle in the filter bar.
 
 ## 4. Series cluster
 
-- [ ] Drop "series" of just one book
-- [ ] Clicking on a series from a book should show the whole series
-- [ ] Remove "Next" concept in series -- just Read and Unread
-- [ ] Series view progress visualization: blue bar for partial, green for
+- [x] Drop "series" of just one book
+- [x] Clicking on a series from a book should show the whole series
+- [x] Remove "Next" concept in series -- just Read and Unread
+- [x] Series view progress visualization: blue bar for partial, green for
   complete? Green border for read books? Consistent color language.
-- [ ] If series continuation is missing from library, still include it as a
+- [x] If series continuation is missing from library, still include it as a
   placeholder (no thumbnail, but title/author/series index) so we can search
   for it in calibre
+- [x] Series should have a "fetch series metadata" on the individual series and should auto-fetch if a book is added from a series (check book metadata, then check series metadata).
+- [ ] We should also do a monthly search against all series we have (can we grab all of them? What's a good rate? 10 / 5 minutes? 1/minute?)
+- [x] Need to figure out best way to keep track of user edits vs series that will get re-updated. Probably keep all online data, but then update with user edits. Could edit the number, ignore the book, edit the (effective) series name ... anything.
+- [x] Would be interesting to see how many are in a series more dynamically ... if there are two, two divisions, if there are 20, 20 divisions of the bar?
+- [x] Should be able to click on an author or a series from the library view and go to a filtered view of those things (filter to author or the individual series view, respectively). They should show that you're mousing over those fields specifically instead of the full book card when you do that. Similarly, should be able to click on the author from the single book view
 
 ## 5. Book detail and editing
 
-- [ ] Clicking on a book should have an edit button (add series, goodreads
+- [x] Clicking on a book should have an edit button (add series, goodreads
   tags, do searches, etc)
-- [ ] After clicking on a book, back should go back to the same spot in the
+- [x] After clicking on a book, back should go back to the same spot in the
   list (or book should be a popup?)
-- [ ] Get rid of "delete" button
+- [x] Get rid of "delete" button
 
 ## 6. UI polish
 
-- [ ] Dark mode
+- [x] Dark mode
 - [ ] List vs thumbnail switch
-- [ ] Infinite scroll (replace current pagination)
+- [x] Infinite scroll (replace current pagination)
 - [ ] Sidebar with #A-Z for quick select of letter (or numbers if sorting by
   rating)
-- [ ] "Read" could be a green border
-- [ ] Fix thumbnail cropping -- shouldn't be cropped
-- [ ] Favicon
+- [x] "Read" could be a green border
+- [x] Fix thumbnail cropping -- shouldn't be cropped
+- [x] Favicon
 
 ## 7. Sort fixes
 
-- [ ] Sort order ascending/descending doesn't make sense with all fields (e.g.
+- [x] Sort order ascending/descending doesn't make sense with all fields (e.g.
   rating should default descending). Make sort direction context-aware.
-- [ ] Sort by date read (already stored as `date_finished`, just needs UI)
+- [x] Sort by date read (already stored as `date_finished`, just needs UI)
 
 ## 8. Bigger features (later)
 
-- [ ] Add book: series autocomplete/suggestions as you type, maybe suggest
+- [x] Add book: series autocomplete/suggestions as you type, maybe suggest
   based on author as well
-- [ ] Search book in calibre
+- [x] Search book in calibre
 - [ ] Multiple kindle email addresses as send-to targets (e.g. send to both
   me and ada's accounts from my library)
-- [ ] Page for books missing metadata (find and fix them)
 
 ## 9. KOReader integration (when hardware arrives)
 

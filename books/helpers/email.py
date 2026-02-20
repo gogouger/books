@@ -7,11 +7,9 @@ from decouple import config
 
 log = logging.getLogger(__name__)
 
-SMTP_HOST = config("smtp_host", default="")
-SMTP_PORT = config("smtp_port", default=587, cast=int)
-SMTP_USER = config("smtp_user", default="")
-SMTP_PASSWORD = config("smtp_password", default="")
-SMTP_FROM = config("smtp_from", default="")
+SMTP_HOST = config("smtp_host", default="localhost")
+SMTP_PORT = config("smtp_port", default=25, cast=int)
+SMTP_FROM = config("smtp_from", default="maclocke@gmail.com")
 
 
 async def send_to_kindle(
@@ -19,7 +17,7 @@ async def send_to_kindle(
     book_title: str,
     epub_path: Path,
 ) -> bool:
-    if not all([SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM]):
+    if not SMTP_HOST:
         log.error("SMTP not configured")
         return False
 
@@ -42,9 +40,8 @@ async def send_to_kindle(
             msg,
             hostname=SMTP_HOST,
             port=SMTP_PORT,
-            username=SMTP_USER,
-            password=SMTP_PASSWORD,
-            start_tls=True,
+            use_tls=False,
+            start_tls=False,
         )
         log.info(
             "Sent '%s' to %s", book_title, kindle_email

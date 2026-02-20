@@ -62,10 +62,10 @@ export function updateNavbar(): void {
     navLinks.style.display = '';
     navUser.style.display = '';
 
-    const isOwner = user && user.username === libraryUser;
+    const isOwner = user && (user.username === libraryUser || user.is_superuser);
 
     if (isOwner) {
-        // Owner viewing own library: full controls
+        // Owner or superuser: full controls
         navAddItem.style.display = '';
         navUsername.textContent = user.display_name;
         navLogout.classList.remove('d-none');
@@ -74,6 +74,11 @@ export function updateNavbar(): void {
             clearAuth();
             window.location.href = '/';
         };
+        // If superuser viewing another library, also show link to own
+        if (user.username !== libraryUser) {
+            navMyLibrary.classList.remove('d-none');
+            navMyLibrary.href = `/${user.username}/`;
+        }
     } else if (user) {
         // Logged-in non-owner: read-only, link to own library
         navMyLibrary.classList.remove('d-none');

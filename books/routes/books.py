@@ -1,19 +1,29 @@
+import asyncio
 import logging
+import re
 import shutil
+import time
 import uuid
 from datetime import datetime, timezone
 
+import httpx
 from fastapi import (
     APIRouter,
     HTTPException,
     Query,
     UploadFile,
 )
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, field_validator
 
-from ..helpers import db
-from ..helpers.auth import library_owner, optional_user, require_owner
+from ..helpers import db, hardcover
+from ..helpers.auth import (
+    library_owner,
+    optional_user,
+    require_owner,
+    require_user,
+)
+from ..helpers.hardcover import _fuzzy_ratio, normalize_title
 from ..helpers.metadata import (
     extract_epub_metadata,
     search_google_books,
@@ -35,11 +45,31 @@ class BookUpdate(BaseModel):
     series_index: float | None = None
     description: str | None = None
     isbn: str | None = None
+    published_date: str | None = None
     goodreads_id: str | None = None
     tags: list[str] | None = None
     date_finished: str | None = None
-    rating: float | None = None
-    is_read: int | None = None
+    rating: int | None = None
+    reading_status: str | None = None
+    progress: float | None = None
+    is_favorite: bool | None = None
+    is_owned: bool | None = None
+
+    @field_validator("rating")
+    @classmethod
+    def validate_rating(cls, v: int | None) -> int | None:
+        if v is not None and (v < 1 or v > 5):
+            raise ValueError("rating must be between 1 and 5")
+        return v
+
+    @field_validator("reading_status")
+    @classmethod
+    def validate_reading_status(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("unread", "reading", "read"):
+            raise ValueError(
+                "reading_status must be 'unread', 'reading', or 'read'"
+            )
+        return v
 
 
 class MetadataSearchRequest(BaseModel):
@@ -50,10 +80,10 @@ class MetadataSearchRequest(BaseModel):
 def _is_owner(
     viewer: dict | None, owner: dict
 ) -> bool:
-    """Check if the viewer is the library owner."""
+    """Check if the viewer is the library owner or a superuser."""
     if viewer is None:
         return False
-    return viewer["user_id"] == owner["id"]
+    return viewer["user_id"] == owner["id"] or viewer.get("is_superuser")
 
 
 # --- Read-only routes (anonymous or authenticated) ---
@@ -65,9 +95,13 @@ def list_books(
     viewer: optional_user,
     q: str | None = None,
     series: str | None = None,
-    is_read: int | None = None,
-    min_rating: float | None = None,
-    max_rating: float | None = None,
+    reading_status: str | None = None,
+    min_rating: int | None = None,
+    max_rating: int | None = None,
+    is_favorite: bool | None = None,
+    is_owned: bool | None = None,
+    has_series: bool | None = None,
+    rated: bool | None = None,
     sort: str = "title",
     order: str = "asc",
     limit: int = Query(default=50, le=200),
@@ -78,9 +112,13 @@ def list_books(
         user_id,
         q=q,
         series=series,
-        is_read=is_read,
+        reading_status=reading_status,
         min_rating=min_rating,
         max_rating=max_rating,
+        is_favorite=is_favorite,
+        is_owned=is_owned,
+        has_series=has_series,
+        rated=rated,
         sort=sort,
         order=order,
         limit=limit,
@@ -90,9 +128,13 @@ def list_books(
         user_id,
         q=q,
         series=series,
-        is_read=is_read,
+        reading_status=reading_status,
         min_rating=min_rating,
         max_rating=max_rating,
+        is_favorite=is_favorite,
+        is_owned=is_owned,
+        has_series=has_series,
+        rated=rated,
     )
     return {
         "books": books,
@@ -117,6 +159,7 @@ def get_book(
             status_code=404, detail="Book not found"
         )
     book["is_owner"] = _is_owner(viewer, owner)
+    book["kindle_email"] = owner.get("kindle_email")
     book["library_owner"] = {
         "username": owner["username"],
         "display_name": owner["display_name"],
@@ -153,7 +196,7 @@ def get_cover(
 # --- Owner-only routes ---
 
 
-@router.post("/books")
+@router.post("/books", response_model=None)
 async def add_book(
     file: UploadFile,
     payload: require_owner,
@@ -161,7 +204,9 @@ async def add_book(
     authors: str | None = None,
     series: str | None = None,
     series_index: float | None = None,
-) -> dict:
+    merge_with: int | None = None,
+    force: bool = False,
+) -> dict | JSONResponse:
     user_id = payload["user_id"]
 
     # Save uploaded epub to temp location
@@ -176,30 +221,136 @@ async def add_book(
 
         book_title = title or meta["title"] or file.filename or "Unknown"
         book_authors = authors or meta["authors"] or "Unknown"
-        sort_title = _make_sort_title(book_title)
+        sort_title = db.make_sort_title(book_title)
 
         now = datetime.now(timezone.utc).isoformat()
 
-        # Insert book record
-        book_id = db.insert_book(
-            user_id=user_id,
-            title=book_title,
-            sort_title=sort_title,
-            authors=book_authors,
-            author_sort=_make_author_sort(book_authors),
-            series=series,
-            series_index=series_index,
-            description=meta.get("description"),
-            cover_filename=None,
-            file_path=f"{book_id}.epub" if False else None,
-            isbn=meta.get("isbn"),
-            goodreads_id=None,
-            tags=meta.get("tags"),
-            date_added=now,
-            date_finished=None,
-            rating=None,
-            is_read=0,
-        )
+        # Resolve series -> series_link_id
+        series_link_id = None
+        if series:
+            series_link_id = db.get_or_create_series_link(
+                user_id, series
+            )
+
+        if merge_with is not None:
+            # Merge into existing book
+            existing = db.get_book(merge_with, user_id)
+            if not existing:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Merge target not found",
+                )
+            book_id = merge_with
+            merge_data = {
+                "title": book_title,
+                "sort_title": sort_title,
+                "authors": book_authors,
+                "author_sort": db.make_author_sort(
+                    book_authors
+                ),
+                "series": series,
+                "series_index": series_index,
+                "series_link_id": series_link_id,
+                "is_owned": 1,
+            }
+            if meta.get("description"):
+                merge_data["description"] = meta["description"]
+            if meta.get("isbn"):
+                merge_data["isbn"] = meta["isbn"]
+            if meta.get("tags"):
+                merge_data["tags"] = meta["tags"]
+            db.update_book(book_id, user_id, merge_data)
+            log.info(
+                "Merged upload into book %d for user %d",
+                book_id, user_id,
+            )
+        else:
+            # Check for existing unowned book to upgrade
+            existing_id = db.find_unowned_match(
+                user_id, book_title,
+                series_link_id=series_link_id,
+                series_index=series_index,
+            )
+
+            if existing_id:
+                # Upgrade unowned placeholder to owned book
+                book_id = existing_id
+                upgrade = {
+                    "title": book_title,
+                    "sort_title": sort_title,
+                    "authors": book_authors,
+                    "author_sort": db.make_author_sort(
+                        book_authors
+                    ),
+                    "series": series,
+                    "series_index": series_index,
+                    "series_link_id": series_link_id,
+                    "is_owned": 1,
+                }
+                if meta.get("description"):
+                    upgrade["description"] = meta["description"]
+                if meta.get("isbn"):
+                    upgrade["isbn"] = meta["isbn"]
+                if meta.get("tags"):
+                    upgrade["tags"] = meta["tags"]
+                db.update_book(book_id, user_id, upgrade)
+                log.info(
+                    "Upgraded unowned book %d to owned for "
+                    "user %d",
+                    book_id, user_id,
+                )
+            else:
+                # Collision check for owned duplicates
+                if not force:
+                    match = db.find_owned_match(
+                        user_id, book_title, book_authors,
+                        series_link_id=series_link_id,
+                        series_index=series_index,
+                    )
+                    if match:
+                        if temp_path.exists():
+                            temp_path.unlink()
+                        return JSONResponse(
+                            status_code=409,
+                            content={
+                                "conflict": True,
+                                "existing_book": {
+                                    "id": match["id"],
+                                    "title": match["title"],
+                                    "authors": match["authors"],
+                                    "series": match.get("series"),
+                                    "series_index": match.get("series_index"),
+                                    "rating": match.get("rating"),
+                                    "reading_status": match.get("reading_status"),
+                                    "cover_filename": match.get("cover_filename"),
+                                    "user_id": match["user_id"],
+                                },
+                            },
+                        )
+
+                # Insert new book record
+                book_id = db.insert_book(
+                    user_id=user_id,
+                    title=book_title,
+                    sort_title=sort_title,
+                    authors=book_authors,
+                    author_sort=db.make_author_sort(
+                        book_authors
+                    ),
+                    series=series,
+                    series_index=series_index,
+                    description=meta.get("description"),
+                    cover_filename=None,
+                    file_path=None,
+                    isbn=meta.get("isbn"),
+                    goodreads_id=None,
+                    tags=meta.get("tags"),
+                    date_added=now,
+                    date_finished=None,
+                    rating=None,
+                    reading_status="unread",
+                    series_link_id=series_link_id,
+                )
 
         # Move epub to final location
         user_files = DATA_DIR / "files" / str(user_id)
@@ -218,13 +369,27 @@ async def add_book(
             user_covers.mkdir(parents=True, exist_ok=True)
             cover_path = user_covers / f"{book_id}.jpg"
             cover_path.write_bytes(meta["cover_data"])
+            now = datetime.now(timezone.utc).isoformat()
             db.update_book(
                 book_id,
                 user_id,
-                {"cover_filename": f"{book_id}.jpg"},
+                {
+                    "cover_filename": f"{book_id}.jpg",
+                    "cover_updated_at": now,
+                },
             )
 
-        return db.get_book(book_id, user_id)
+        book = db.get_book(book_id, user_id)
+
+        # Auto-link series in background if book has a series
+        if series and series_link_id:
+            asyncio.create_task(
+                _link_series_background(
+                    user_id, series_link_id
+                )
+            )
+
+        return book
     finally:
         if temp_path.exists():
             temp_path.unlink()
@@ -237,11 +402,33 @@ def update_book(
     payload: require_owner,
 ) -> dict:
     user_id = payload["user_id"]
-    update_data = updates.model_dump(exclude_none=True)
+    update_data = updates.model_dump(exclude_unset=True)
     if not update_data:
         raise HTTPException(
             status_code=400, detail="No updates provided"
         )
+
+    # Auto-compute sort fields when title or authors change
+    if "title" in update_data and update_data["title"]:
+        update_data["sort_title"] = db.make_sort_title(
+            update_data["title"]
+        )
+    if "authors" in update_data and update_data["authors"]:
+        update_data["author_sort"] = db.make_author_sort(
+            update_data["authors"]
+        )
+
+    # Resolve series name to series_link_id
+    if "series" in update_data:
+        if update_data["series"]:
+            update_data["series_link_id"] = (
+                db.get_or_create_series_link(
+                    user_id, update_data["series"]
+                )
+            )
+        else:
+            update_data["series_link_id"] = None
+
     success = db.update_book(book_id, user_id, update_data)
     if not success:
         raise HTTPException(
@@ -262,27 +449,44 @@ def delete_book(
             status_code=404, detail="Book not found"
         )
 
-    # Delete files
+    archive_user = db.get_user_by_username("archive")
+    if not archive_user:
+        raise HTTPException(
+            status_code=500,
+            detail="Archive user not found",
+        )
+    archive_id = archive_user["id"]
+
+    # Move files to archive directories
     if book.get("cover_filename"):
-        cover = (
-            DATA_DIR
-            / "covers"
-            / str(user_id)
+        src = (
+            DATA_DIR / "covers" / str(user_id)
             / book["cover_filename"]
         )
-        if cover.exists():
-            cover.unlink()
+        if src.exists():
+            dst_dir = (
+                DATA_DIR / "covers" / str(archive_id)
+            )
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(
+                str(src), str(dst_dir / f"{book_id}.jpg")
+            )
     if book.get("file_path"):
-        epub = (
-            DATA_DIR
-            / "files"
-            / str(user_id)
+        src = (
+            DATA_DIR / "files" / str(user_id)
             / book["file_path"]
         )
-        if epub.exists():
-            epub.unlink()
+        if src.exists():
+            dst_dir = (
+                DATA_DIR / "files" / str(archive_id)
+            )
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(
+                str(src),
+                str(dst_dir / f"{book_id}.epub"),
+            )
 
-    db.delete_book(book_id, user_id)
+    db.archive_book(book_id, user_id, archive_id)
     return {"success": True}
 
 
@@ -311,6 +515,106 @@ def get_file(
         media_type="application/epub+zip",
         filename=f"{book['title']}.epub",
     )
+
+
+@router.post("/books/{book_id}/copy-to-temp")
+async def copy_to_temp(
+    book_id: int,
+    owner: library_owner,
+    viewer: require_user,
+) -> dict:
+    """Copy a book's epub to temp and return preview data.
+
+    Allows any logged-in user to start copying a book from
+    another user's library into their own via the metadata
+    picker flow.
+    """
+    book = db.get_book(book_id, owner["id"])
+    if book is None:
+        raise HTTPException(
+            status_code=404, detail="Book not found"
+        )
+
+    temp_id = str(uuid.uuid4())
+    epub_source = None
+    epub_cover_url = None
+
+    # Copy epub to temp if source has one
+    if book.get("file_path"):
+        src_epub = (
+            DATA_DIR / "files" / str(owner["id"])
+            / book["file_path"]
+        )
+        if src_epub.exists():
+            temp_path = DATA_DIR / f"temp_{temp_id}.epub"
+            shutil.copy2(str(src_epub), str(temp_path))
+
+            meta = extract_epub_metadata(str(temp_path))
+
+            if meta.get("cover_data"):
+                cover_path = (
+                    DATA_DIR / f"temp_{temp_id}_cover.jpg"
+                )
+                cover_path.write_bytes(meta["cover_data"])
+                epub_cover_url = (
+                    f"/api/{viewer['username']}/metadata"
+                    f"/preview-cover/{temp_id}"
+                )
+
+            epub_source = _normalize_result({
+                "title": meta.get("title") or "",
+                "authors": meta.get("authors") or "",
+                "description": (
+                    meta.get("description") or ""
+                ),
+                "isbn": meta.get("isbn") or "",
+                "published_date": "",
+                "cover_url": epub_cover_url,
+                "series": meta.get("series") or "",
+                "series_index": meta.get("series_index"),
+            })
+
+    # Build "current" source from the source book's data
+    current_cover_url = None
+    if book.get("cover_filename"):
+        current_cover_url = (
+            f"/covers/{owner['id']}"
+            f"/{book['cover_filename']}"
+        )
+    current = _normalize_result({
+        "title": book.get("title") or "",
+        "authors": book.get("authors") or "",
+        "description": book.get("description") or "",
+        "isbn": book.get("isbn") or "",
+        "published_date": (
+            book.get("published_date") or ""
+        ),
+        "cover_url": current_cover_url,
+        "series": book.get("series") or "",
+        "series_index": book.get("series_index"),
+    })
+
+    # Fetch external sources
+    title = book.get("title") or ""
+    authors = book.get("authors") or ""
+    isbn = book.get("isbn") or ""
+    google, hc, ol, errors = await _fetch_all_sources(
+        title, authors, isbn
+    )
+
+    return {
+        "temp_id": temp_id,
+        "current": current,
+        "epub": epub_source,
+        "google": google,
+        "hardcover": hc,
+        "openlibrary": ol,
+        "errors": {
+            "google": errors.get("google"),
+            "hardcover": errors.get("hardcover"),
+            "openlibrary": errors.get("openlibrary"),
+        },
+    }
 
 
 @router.post("/metadata/search")
@@ -343,21 +647,910 @@ async def extract_metadata(
             temp_path.unlink()
 
 
-def _make_sort_title(title: str) -> str:
-    lower = title.lower()
-    for prefix in ("the ", "a ", "an "):
-        if lower.startswith(prefix):
-            return title[len(prefix):] + ", " + title[:len(prefix) - 1]
-    return title
+def _strip_html(text: str) -> str:
+    """Strip HTML tags from a string."""
+    return re.sub(r"<[^>]+>", "", text)
 
 
-def _make_author_sort(authors: str) -> str:
-    parts = []
-    for author in authors.split(","):
-        author = author.strip()
-        names = author.split()
-        if len(names) > 1:
-            parts.append(f"{names[-1]}, {' '.join(names[:-1])}")
+def _title_matches(
+    result_title: str, book_title: str
+) -> bool:
+    """Check if an ISBN lookup result title matches the book.
+
+    Uses a low threshold (0.5) since we just want to catch
+    clearly wrong books (e.g. ISBN returning a different book).
+    """
+    return (
+        _fuzzy_ratio(
+            normalize_title(result_title),
+            normalize_title(book_title),
+        )
+        > 0.5
+    )
+
+
+def _pick_best_result(
+    results: list[dict], book_title: str
+) -> dict:
+    """Pick the result whose title best matches book_title."""
+    book_norm = normalize_title(book_title)
+    best = results[0]
+    best_score = _fuzzy_ratio(
+        normalize_title(best.get("title", "")), book_norm
+    )
+    for r in results[1:]:
+        score = _fuzzy_ratio(
+            normalize_title(r.get("title", "")), book_norm
+        )
+        if score > best_score:
+            best_score = score
+            best = r
+    return best
+
+
+def _normalize_result(r: dict) -> dict:
+    """Normalize a metadata result to standard fields."""
+    return {
+        "title": r.get("title") or "",
+        "authors": r.get("authors") or "",
+        "description": _strip_html(
+            r.get("description") or ""
+        ),
+        "isbn": r.get("isbn") or "",
+        "published_date": (
+            r.get("published_date") or ""
+        ),
+        "cover_url": r.get("cover_url") or None,
+        "series": (
+            r.get("series_name") or r.get("series") or ""
+        ),
+        "series_index": (
+            str(r["series_index"])
+            if r.get("series_index") is not None
+            else ""
+        ),
+    }
+
+
+async def _fetch_google(
+    title: str,
+    authors: str,
+    isbn: str,
+    errors: dict[str, str | None],
+) -> dict | None:
+    """Fetch metadata from Google Books."""
+    try:
+        query = f"{title} {authors}"
+        if isbn:
+            log.info(
+                "Google Books: trying ISBN lookup %r",
+                isbn,
+            )
+            results = await search_google_books(
+                f"isbn:{isbn}", max_results=1
+            )
+            if results:
+                r = results[0]
+                if _title_matches(
+                    r.get("title", ""), title
+                ):
+                    return _normalize_result(r)
+                log.warning(
+                    "Google Books: ISBN %r returned "
+                    "%r but expected %r, "
+                    "falling back to query",
+                    isbn,
+                    r.get("title", ""),
+                    title,
+                )
+            else:
+                log.info(
+                    "Google Books: ISBN lookup empty, "
+                    "falling back to query"
+                )
+        log.info("Google Books: searching %r", query)
+        results = await search_google_books(query)
+        if not results:
+            errors["google"] = "No results found"
+            return None
+        return _normalize_result(
+            _pick_best_result(results, title)
+        )
+    except Exception as exc:
+        msg = str(exc)
+        log.exception("Google metadata fetch failed")
+        errors["google"] = msg
+        return None
+
+
+async def _fetch_hardcover(
+    title: str,
+    authors: str,
+    _isbn: str,
+    errors: dict[str, str | None],
+) -> dict | None:
+    """Fetch metadata from Hardcover."""
+    try:
+        hc_query = f"{title} {authors}"
+        log.info("Hardcover: searching %r", hc_query)
+        results = await hardcover.search_books(hc_query)
+        best = hardcover.pick_best_book(
+            title, authors, results
+        )
+        if not best:
+            errors["hardcover"] = (
+                "No matching book found"
+            )
+            return None
+        detail = await hardcover.fetch_book_detail(
+            best["id"]
+        )
+        if not detail:
+            errors["hardcover"] = (
+                "Book detail fetch returned empty"
+            )
+            return None
+        log.info(
+            "Hardcover: got detail for %r",
+            detail.get("title"),
+        )
+        return _normalize_result(detail)
+    except Exception as exc:
+        msg = str(exc)
+        log.exception("Hardcover metadata fetch failed")
+        errors["hardcover"] = msg
+        return None
+
+
+async def _fetch_openlibrary(
+    title: str,
+    authors: str,
+    isbn: str,
+    errors: dict[str, str | None],
+) -> dict | None:
+    """Fetch metadata from Open Library."""
+    try:
+        query = f"{title} {authors}"
+        ol_query = query
+        if isbn:
+            ol_query = f"isbn:{isbn}"
+            log.info(
+                "Open Library: searching by ISBN %r",
+                isbn,
+            )
         else:
-            parts.append(author)
-    return " & ".join(parts)
+            log.info(
+                "Open Library: searching %r", ol_query
+            )
+        results = await search_open_library(
+            ol_query, max_results=3
+        )
+        if (
+            results
+            and isbn
+            and ol_query.startswith("isbn:")
+        ):
+            r = results[0]
+            if not _title_matches(
+                r.get("title", ""), title
+            ):
+                log.warning(
+                    "Open Library: ISBN %r returned "
+                    "%r but expected %r, "
+                    "falling back to query",
+                    isbn,
+                    r.get("title", ""),
+                    title,
+                )
+                results = await search_open_library(
+                    query, max_results=3
+                )
+        if not results:
+            errors["openlibrary"] = "No results found"
+            return None
+        r = _pick_best_result(results, title)
+        cover_url = None
+        if r.get("cover_id"):
+            cover_url = (
+                "https://covers.openlibrary.org/b/id/"
+                f"{r['cover_id']}-L.jpg"
+            )
+        return _normalize_result({
+            "title": r.get("title") or "",
+            "authors": r.get("authors") or "",
+            "description": "",
+            "isbn": r.get("isbn") or "",
+            "published_date": str(
+                r.get("first_publish_year") or ""
+            ),
+            "cover_url": cover_url,
+        })
+    except Exception as exc:
+        msg = str(exc)
+        log.exception(
+            "Open Library metadata fetch failed"
+        )
+        errors["openlibrary"] = msg
+        return None
+
+
+async def _fetch_all_sources(
+    title: str, authors: str, isbn: str
+) -> tuple[
+    dict | None, dict | None, dict | None,
+    dict[str, str | None],
+]:
+    """Fetch metadata from all external sources."""
+    errors: dict[str, str | None] = {}
+    google, hc, ol = await asyncio.gather(
+        _fetch_google(title, authors, isbn, errors),
+        _fetch_hardcover(title, authors, isbn, errors),
+        _fetch_openlibrary(
+            title, authors, isbn, errors
+        ),
+    )
+    return google, hc, ol, errors
+
+
+def _cleanup_old_temp_files() -> None:
+    """Delete temp_* files in DATA_DIR older than 1 hour."""
+    cutoff = time.time() - 3600
+    for entry in DATA_DIR.iterdir():
+        if (
+            entry.name.startswith("temp_")
+            and entry.is_file()
+            and entry.stat().st_mtime < cutoff
+        ):
+            try:
+                entry.unlink()
+            except OSError:
+                pass
+
+
+class BookFromPreview(BaseModel):
+    temp_id: str
+    title: str
+    authors: str
+    series: str | None = None
+    series_index: float | None = None
+    description: str | None = None
+    isbn: str | None = None
+    published_date: str | None = None
+    cover_url: str | None = None
+    merge_with: int | None = None
+    force: bool = False
+    manual: bool = False
+
+
+class ManualSearchRequest(BaseModel):
+    title: str
+    authors: str
+
+
+@router.post("/metadata/preview")
+async def preview_metadata(
+    file: UploadFile,
+    payload: require_owner,
+) -> dict:
+    """Upload EPUB and get metadata from all sources."""
+    _cleanup_old_temp_files()
+
+    temp_id = str(uuid.uuid4())
+    temp_path = DATA_DIR / f"temp_{temp_id}.epub"
+
+    content = await file.read()
+    with open(temp_path, "wb") as f:
+        f.write(content)
+
+    meta = extract_epub_metadata(str(temp_path))
+
+    # Save EPUB cover to temp file if present
+    if meta.get("cover_data"):
+        cover_path = DATA_DIR / f"temp_{temp_id}_cover.jpg"
+        cover_path.write_bytes(meta["cover_data"])
+
+    title = meta.get("title") or file.filename or "Unknown"
+    authors = meta.get("authors") or "Unknown"
+    isbn = meta.get("isbn") or ""
+
+    # Build EPUB source
+    username = payload["username"]
+    epub_cover_url = None
+    if meta.get("cover_data"):
+        epub_cover_url = (
+            f"/api/{username}/metadata"
+            f"/preview-cover/{temp_id}"
+        )
+
+    epub_source = _normalize_result({
+        "title": meta.get("title") or "",
+        "authors": meta.get("authors") or "",
+        "description": meta.get("description") or "",
+        "isbn": isbn,
+        "published_date": "",
+        "cover_url": epub_cover_url,
+        "series": meta.get("series") or "",
+        "series_index": meta.get("series_index"),
+    })
+
+    # Fetch all external sources in parallel
+    google, hc, ol, errors = await _fetch_all_sources(
+        title, authors, isbn
+    )
+
+    return {
+        "temp_id": temp_id,
+        "epub": epub_source,
+        "google": google,
+        "hardcover": hc,
+        "openlibrary": ol,
+        "errors": {
+            "google": errors.get("google"),
+            "hardcover": errors.get("hardcover"),
+            "openlibrary": errors.get("openlibrary"),
+        },
+    }
+
+
+@router.post("/metadata/search-all")
+async def search_all_metadata(
+    req: ManualSearchRequest,
+    _payload: require_owner,
+) -> dict:
+    """Search all external sources by title and author."""
+    temp_id = str(uuid.uuid4())
+
+    google, hc, ol, errors = await _fetch_all_sources(
+        req.title, req.authors, isbn=""
+    )
+
+    return {
+        "temp_id": temp_id,
+        "epub": None,
+        "google": google,
+        "hardcover": hc,
+        "openlibrary": ol,
+        "errors": {
+            "google": errors.get("google"),
+            "hardcover": errors.get("hardcover"),
+            "openlibrary": errors.get("openlibrary"),
+        },
+    }
+
+
+@router.get("/metadata/preview-cover/{temp_id}")
+async def preview_cover(
+    temp_id: str,
+    _owner: library_owner,
+    _viewer: optional_user,
+) -> FileResponse:
+    """Serve a temp EPUB cover image."""
+    # Validate UUID format to prevent path traversal
+    try:
+        uuid.UUID(temp_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="Invalid temp_id"
+        )
+
+    cover_path = DATA_DIR / f"temp_{temp_id}_cover.jpg"
+    if not cover_path.exists():
+        raise HTTPException(
+            status_code=404, detail="Cover not found"
+        )
+    return FileResponse(
+        str(cover_path), media_type="image/jpeg"
+    )
+
+
+@router.post("/books/from-preview", response_model=None)
+async def add_book_from_preview(
+    req: BookFromPreview,
+    payload: require_owner,
+) -> dict | JSONResponse:
+    """Create a book from a preview temp file."""
+    # Validate temp_id
+    try:
+        uuid.UUID(req.temp_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="Invalid temp_id"
+        )
+
+    user_id = payload["user_id"]
+    temp_path = DATA_DIR / f"temp_{req.temp_id}.epub"
+    temp_cover = DATA_DIR / f"temp_{req.temp_id}_cover.jpg"
+    has_epub = temp_path.exists()
+
+    if not has_epub and not req.manual:
+        raise HTTPException(
+            status_code=404,
+            detail="Preview expired or not found",
+        )
+
+    try:
+        # Re-extract cover_data from temp epub for saving
+        meta = (
+            extract_epub_metadata(str(temp_path))
+            if has_epub
+            else {}
+        )
+
+        book_title = req.title
+        book_authors = req.authors
+        sort_title = db.make_sort_title(book_title)
+        now = datetime.now(timezone.utc).isoformat()
+
+        series_link_id = None
+        if req.series:
+            series_link_id = (
+                db.get_or_create_series_link(
+                    user_id, req.series
+                )
+            )
+
+        if req.merge_with is not None:
+            existing = db.get_book(
+                req.merge_with, user_id
+            )
+            if not existing:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Merge target not found",
+                )
+            book_id = req.merge_with
+            merge_data = {
+                "title": book_title,
+                "sort_title": sort_title,
+                "authors": book_authors,
+                "author_sort": db.make_author_sort(
+                    book_authors
+                ),
+                "series": req.series,
+                "series_index": req.series_index,
+                "series_link_id": series_link_id,
+                "is_owned": 1 if has_epub else 0,
+            }
+            if req.description:
+                merge_data["description"] = req.description
+            if req.isbn:
+                merge_data["isbn"] = req.isbn
+            if req.published_date:
+                merge_data["published_date"] = (
+                    req.published_date
+                )
+            if meta.get("tags"):
+                merge_data["tags"] = meta["tags"]
+            db.update_book(book_id, user_id, merge_data)
+            log.info(
+                "Merged preview into book %d for user %d",
+                book_id, user_id,
+            )
+        else:
+            existing_id = db.find_unowned_match(
+                user_id,
+                book_title,
+                series_link_id=series_link_id,
+                series_index=req.series_index,
+            )
+
+            if existing_id:
+                book_id = existing_id
+                upgrade = {
+                    "title": book_title,
+                    "sort_title": sort_title,
+                    "authors": book_authors,
+                    "author_sort": db.make_author_sort(
+                        book_authors
+                    ),
+                    "series": req.series,
+                    "series_index": req.series_index,
+                    "series_link_id": series_link_id,
+                    "is_owned": 1 if has_epub else 0,
+                }
+                if req.description:
+                    upgrade["description"] = (
+                        req.description
+                    )
+                if req.isbn:
+                    upgrade["isbn"] = req.isbn
+                if req.published_date:
+                    upgrade["published_date"] = (
+                        req.published_date
+                    )
+                if meta.get("tags"):
+                    upgrade["tags"] = meta["tags"]
+                db.update_book(
+                    book_id, user_id, upgrade
+                )
+                log.info(
+                    "Upgraded unowned book %d to owned "
+                    "for user %d",
+                    book_id,
+                    user_id,
+                )
+            else:
+                if not req.force:
+                    match = db.find_owned_match(
+                        user_id,
+                        book_title,
+                        book_authors,
+                        series_link_id=series_link_id,
+                        series_index=req.series_index,
+                    )
+                    if match:
+                        return JSONResponse(
+                            status_code=409,
+                            content={
+                                "conflict": True,
+                                "existing_book": {
+                                    "id": match["id"],
+                                    "title": match[
+                                        "title"
+                                    ],
+                                    "authors": match[
+                                        "authors"
+                                    ],
+                                    "series": match.get(
+                                        "series"
+                                    ),
+                                    "series_index": match.get(
+                                        "series_index"
+                                    ),
+                                    "rating": match.get(
+                                        "rating"
+                                    ),
+                                    "reading_status": match.get(
+                                        "reading_status"
+                                    ),
+                                    "cover_filename": match.get(
+                                        "cover_filename"
+                                    ),
+                                    "user_id": match[
+                                        "user_id"
+                                    ],
+                                },
+                            },
+                        )
+
+                book_id = db.insert_book(
+                    user_id=user_id,
+                    title=book_title,
+                    sort_title=sort_title,
+                    authors=book_authors,
+                    author_sort=db.make_author_sort(
+                        book_authors
+                    ),
+                    series=req.series,
+                    series_index=req.series_index,
+                    description=req.description,
+                    cover_filename=None,
+                    file_path=None,
+                    isbn=req.isbn,
+                    goodreads_id=None,
+                    tags=meta.get("tags"),
+                    date_added=now,
+                    date_finished=None,
+                    rating=None,
+                    reading_status="unread",
+                    series_link_id=series_link_id,
+                    is_owned=1 if has_epub else 0,
+                )
+
+        # Move epub to final location
+        if has_epub:
+            user_files = (
+                DATA_DIR / "files" / str(user_id)
+            )
+            user_files.mkdir(parents=True, exist_ok=True)
+            final_path = user_files / f"{book_id}.epub"
+            shutil.move(str(temp_path), str(final_path))
+
+            db.update_book(
+                book_id,
+                user_id,
+                {"file_path": f"{book_id}.epub"},
+            )
+
+            # Save EPUB cover
+            if meta.get("cover_data"):
+                user_covers = (
+                    DATA_DIR / "covers" / str(user_id)
+                )
+                user_covers.mkdir(
+                    parents=True, exist_ok=True
+                )
+                cover_path = (
+                    user_covers / f"{book_id}.jpg"
+                )
+                cover_path.write_bytes(meta["cover_data"])
+                db.update_book(
+                    book_id,
+                    user_id,
+                    {
+                        "cover_filename": f"{book_id}.jpg",
+                        "cover_updated_at": datetime.now(
+                            timezone.utc
+                        ).isoformat(),
+                    },
+                )
+
+        # If external cover URL selected, download it
+        if req.cover_url and not req.cover_url.startswith(
+            "/api/"
+        ):
+            try:
+                async with httpx.AsyncClient(
+                    timeout=15, follow_redirects=True
+                ) as client:
+                    resp = await client.get(req.cover_url)
+                    resp.raise_for_status()
+                    ct = resp.headers.get(
+                        "content-type", ""
+                    )
+                    if ct.startswith("image/"):
+                        user_covers = (
+                            DATA_DIR
+                            / "covers"
+                            / str(user_id)
+                        )
+                        user_covers.mkdir(
+                            parents=True, exist_ok=True
+                        )
+                        cover_p = (
+                            user_covers / f"{book_id}.jpg"
+                        )
+                        cover_p.write_bytes(resp.content)
+                        db.update_book(
+                            book_id,
+                            user_id,
+                            {
+                                "cover_filename": f"{book_id}.jpg",
+                                "cover_updated_at": datetime.now(
+                                    timezone.utc
+                                ).isoformat(),
+                            },
+                        )
+            except Exception:
+                log.exception(
+                    "Failed to download cover from %s",
+                    req.cover_url,
+                )
+
+        book = db.get_book(book_id, user_id)
+
+        if req.series and series_link_id:
+            asyncio.create_task(
+                _link_series_background(
+                    user_id, series_link_id
+                )
+            )
+
+        return book
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+        if temp_cover.exists():
+            temp_cover.unlink()
+
+
+@router.post("/books/{book_id}/refresh-metadata")
+async def refresh_metadata(
+    book_id: int,
+    payload: require_owner,
+) -> dict:
+    user_id = payload["user_id"]
+    book = db.get_book(book_id, user_id)
+    if book is None:
+        raise HTTPException(
+            status_code=404, detail="Book not found"
+        )
+
+    # Build current metadata
+    cover_url = None
+    if book.get("cover_filename"):
+        cover_url = (
+            f"/covers/{user_id}/{book['cover_filename']}"
+        )
+    current = {
+        "title": book.get("title") or "",
+        "authors": book.get("authors") or "",
+        "description": book.get("description") or "",
+        "isbn": book.get("isbn") or "",
+        "published_date": book.get("published_date") or "",
+        "cover_url": cover_url,
+        "series": book.get("series") or "",
+        "series_index": (
+            str(book["series_index"])
+            if book.get("series_index") is not None
+            else ""
+        ),
+    }
+
+    # EPUB source: extract metadata from owned file
+    epub_source = None
+    if book.get("file_path"):
+        epub_path = (
+            DATA_DIR
+            / "files"
+            / str(user_id)
+            / book["file_path"]
+        )
+        if epub_path.exists():
+            try:
+                meta = extract_epub_metadata(
+                    str(epub_path)
+                )
+                epub_source = _normalize_result({
+                    "title": meta.get("title") or "",
+                    "authors": meta.get("authors") or "",
+                    "description": (
+                        meta.get("description") or ""
+                    ),
+                    "isbn": meta.get("isbn") or "",
+                    "published_date": "",
+                    "cover_url": None,
+                    "series": meta.get("series") or "",
+                    "series_index": meta.get(
+                        "series_index"
+                    ),
+                })
+            except Exception:
+                log.exception(
+                    "Failed to extract EPUB metadata "
+                    "for book %d",
+                    book_id,
+                )
+
+    title = book.get("title") or ""
+    authors = book.get("authors") or ""
+    isbn = book.get("isbn") or ""
+
+    google, hc, ol, errors = await _fetch_all_sources(
+        title, authors, isbn
+    )
+
+    return {
+        "current": current,
+        "epub": epub_source,
+        "google": google,
+        "hardcover": hc,
+        "openlibrary": ol,
+        "errors": {
+            "google": errors.get("google"),
+            "hardcover": errors.get("hardcover"),
+            "openlibrary": errors.get("openlibrary"),
+        },
+    }
+
+
+class CoverFromUrlRequest(BaseModel):
+    url: str
+
+
+@router.post("/books/{book_id}/cover-from-url")
+async def cover_from_url(
+    book_id: int,
+    req: CoverFromUrlRequest,
+    payload: require_owner,
+) -> dict:
+    user_id = payload["user_id"]
+    book = db.get_book(book_id, user_id)
+    if book is None:
+        raise HTTPException(
+            status_code=404, detail="Book not found"
+        )
+
+    # Download image
+    async with httpx.AsyncClient(
+        timeout=15, follow_redirects=True
+    ) as client:
+        resp = await client.get(req.url)
+        resp.raise_for_status()
+        content_type = resp.headers.get(
+            "content-type", ""
+        )
+        if not content_type.startswith("image/"):
+            raise HTTPException(
+                status_code=400,
+                detail="URL is not an image",
+            )
+        if len(resp.content) > 5 * 1024 * 1024:
+            raise HTTPException(
+                status_code=400,
+                detail="Image too large (>5MB)",
+            )
+
+    # Save cover
+    user_covers = DATA_DIR / "covers" / str(user_id)
+    user_covers.mkdir(parents=True, exist_ok=True)
+    cover_path = user_covers / f"{book_id}.jpg"
+    cover_path.write_bytes(resp.content)
+
+    now = datetime.now(timezone.utc).isoformat()
+    cover_filename = f"{book_id}.jpg"
+    db.update_book(
+        book_id, user_id,
+        {
+            "cover_filename": cover_filename,
+            "cover_updated_at": now,
+        },
+    )
+    return {"cover_filename": cover_filename}
+
+
+async def _link_series_background(
+    user_id: int, series_link_id: int
+) -> None:
+    """Link a series to Hardcover data in the background.
+
+    If the series is not yet linked, searches Hardcover, fetches
+    the book list, matches against library books, and writes to DB.
+    If already linked, re-runs matching to pick up the new book.
+    """
+    try:
+        link = db.get_series_link_by_id(series_link_id)
+        if not link:
+            return
+        series_name = link["series_name"]
+
+        if link.get("hardcover_series_id"):
+            hc_series_id = link["hardcover_series_id"]
+            hc_series_name = link["hardcover_series_name"]
+            hc_slug = link.get("hardcover_slug")
+        else:
+            results = await hardcover.search_series(
+                series_name
+            )
+            best = hardcover.pick_best_series(
+                series_name, results
+            )
+            if not best:
+                return
+            hc_series_id = best["id"]
+            hc_series_name = best["name"]
+            hc_slug = best.get("slug")
+
+        raw_books = await hardcover.fetch_series_books(
+            hc_series_id
+        )
+        if not raw_books:
+            return
+
+        data_hash = hardcover.compute_data_hash(raw_books)
+        db.link_series(
+            series_link_id,
+            hc_series_id, hc_series_name,
+            data_hash=data_hash,
+            hardcover_slug=hc_slug,
+        )
+        db.store_hc_series_books(series_link_id, raw_books)
+
+        deduped = hardcover.dedup_series_books(raw_books)
+        library_books = db.get_series_books(
+            user_id, series_link_id
+        )
+        entries = hardcover.match_books(
+            deduped, library_books
+        )
+
+        # Sync matched books' positions
+        db.sync_book_positions(user_id, entries)
+
+        # Global entry upsert (preserves IDs)
+        db.upsert_series_entries(series_link_id, entries)
+
+        # Per-user: create placeholder books
+        db.ensure_user_books_for_series(
+            user_id, series_link_id, series_name
+        )
+
+        log.info(
+            "Auto-linked series %s (id=%d) for user %d",
+            series_name, series_link_id, user_id,
+        )
+    except Exception:
+        log.exception(
+            "Failed to auto-link series id=%d for user %d",
+            series_link_id, user_id,
+        )

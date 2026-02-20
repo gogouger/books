@@ -13,13 +13,13 @@ export function getLibraryUsername(): string | null {
 }
 
 /**
- * Check if the currently logged-in user owns the library
- * being viewed (i.e. their username matches the URL path).
+ * Check if the currently logged-in user can edit the library
+ * being viewed (owner or superuser).
  */
 export function isOwner(): boolean {
     const libraryUser = getLibraryUsername();
     if (!libraryUser) return false;
     const me = getUser();
     if (!me) return false;
-    return me.username === libraryUser;
+    return me.username === libraryUser || me.is_superuser;
 }

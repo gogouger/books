@@ -1,9 +1,14 @@
+import hashlib
 import json
 import logging
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
+import bcrypt
 from decouple import config
+
+from .hardcover import normalize_title
 
 log = logging.getLogger(__name__)
 
@@ -16,7 +21,8 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT UNIQUE NOT NULL,
     display_name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
-    kindle_email TEXT
+    kindle_email TEXT,
+    is_superuser INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS books (
@@ -28,16 +34,23 @@ CREATE TABLE IF NOT EXISTS books (
     author_sort TEXT,
     series TEXT,
     series_index REAL,
+    series_link_id INTEGER REFERENCES series_link(id)
+        ON DELETE SET NULL,
     description TEXT,
     cover_filename TEXT,
+    cover_updated_at TEXT,
     file_path TEXT,
     isbn TEXT,
     goodreads_id TEXT,
     tags TEXT,
     date_added TEXT NOT NULL,
     date_finished TEXT,
+    published_date TEXT,
     rating REAL,
-    is_read INTEGER DEFAULT 0
+    is_read INTEGER DEFAULT 0,
+    reading_status TEXT DEFAULT 'unread',
+    progress REAL,
+    is_owned INTEGER DEFAULT 1
 );
 
 CREATE INDEX IF NOT EXISTS idx_books_user
@@ -46,7 +59,100 @@ CREATE INDEX IF NOT EXISTS idx_books_series
     ON books(user_id, series);
 CREATE INDEX IF NOT EXISTS idx_books_read
     ON books(user_id, is_read);
+CREATE INDEX IF NOT EXISTS idx_books_status
+    ON books(user_id, reading_status);
+
+CREATE TABLE IF NOT EXISTS series_link (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    series_name TEXT NOT NULL,
+    hardcover_series_id INTEGER,
+    hardcover_series_name TEXT,
+    hardcover_slug TEXT,
+    last_checked TEXT,
+    data_hash TEXT
+);
+
+CREATE TABLE IF NOT EXISTS series_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    series_link_id INTEGER NOT NULL
+        REFERENCES series_link(id) ON DELETE CASCADE,
+    position REAL NOT NULL,
+    title TEXT NOT NULL,
+    author TEXT,
+    hardcover_book_id INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_series_entries_link
+    ON series_entries(series_link_id);
+CREATE INDEX IF NOT EXISTS idx_series_entries_position
+    ON series_entries(series_link_id, position);
+
+CREATE TABLE IF NOT EXISTS user_series (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    series_link_id INTEGER NOT NULL
+        REFERENCES series_link(id) ON DELETE CASCADE,
+    monitored INTEGER NOT NULL DEFAULT 1,
+    display_name TEXT,
+    UNIQUE(user_id, series_link_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_series
+    ON user_series(user_id, series_link_id);
+
+CREATE TABLE IF NOT EXISTS user_entry_status (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    series_entry_id INTEGER NOT NULL
+        REFERENCES series_entries(id) ON DELETE CASCADE,
+    status TEXT NOT NULL
+        CHECK(status IN ('linked', 'ignored')),
+    UNIQUE(user_id, series_entry_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_entry_status
+    ON user_entry_status(user_id, series_entry_id);
+
+CREATE TABLE IF NOT EXISTS hc_series_books (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    series_link_id INTEGER NOT NULL
+        REFERENCES series_link(id) ON DELETE CASCADE,
+    position REAL,
+    title TEXT NOT NULL,
+    author TEXT,
+    hardcover_book_id INTEGER,
+    featured INTEGER DEFAULT 0,
+    compilation INTEGER DEFAULT 0,
+    ratings_count INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_hc_series_books_link
+    ON hc_series_books(series_link_id);
 """
+
+
+def make_sort_title(title: str) -> str:
+    """Strip leading articles for alphabetical sorting."""
+    lower = title.lower()
+    for prefix in ("the ", "a ", "an "):
+        if lower.startswith(prefix):
+            return title[len(prefix):] + ", " + title[:len(prefix) - 1]
+    return title
+
+
+def make_author_sort(authors: str) -> str:
+    """Convert 'First Last' to 'Last, First' for sorting."""
+    parts = []
+    for author in authors.split(","):
+        author = author.strip()
+        names = author.split()
+        if len(names) > 1:
+            parts.append(
+                f"{names[-1]}, {' '.join(names[:-1])}"
+            )
+        else:
+            parts.append(author)
+    return " & ".join(parts)
 
 
 def get_db() -> sqlite3.Connection:
@@ -65,7 +171,818 @@ def init_db() -> None:
     conn.executescript(SCHEMA)
     conn.commit()
     conn.close()
+    _migrate_reading_status()
+    _migrate_favorites()
+    _migrate_series_data_hash()
+    _migrate_is_owned()
+    _migrate_missing_to_books()
+    _migrate_drop_date_started()
+    _migrate_series_link_id()
+    _migrate_published_date()
+    _migrate_cover_updated_at()
+    _migrate_series_monitored()
+    _migrate_global_series()
+    _migrate_user_libraries()
+    _migrate_superusers()
+    _migrate_archive_user()
+    _migrate_series_ignored()
     log.info("Database initialized at %s", DB_PATH)
+
+
+def _migrate_reading_status() -> None:
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(books)"
+        ).fetchall()
+    ]
+    if "reading_status" in columns:
+        conn.close()
+        return
+
+    log.info("Migrating is_read -> reading_status")
+    conn.execute(
+        "ALTER TABLE books ADD COLUMN reading_status"
+        " TEXT DEFAULT 'unread'"
+    )
+    conn.execute(
+        "ALTER TABLE books ADD COLUMN progress REAL"
+    )
+    conn.execute(
+        "UPDATE books SET reading_status = 'read'"
+        " WHERE is_read = 1"
+    )
+    conn.execute(
+        "UPDATE books SET reading_status = 'unread'"
+        " WHERE is_read = 0 OR is_read IS NULL"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_books_status"
+        " ON books(user_id, reading_status)"
+    )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_favorites() -> None:
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(books)"
+        ).fetchall()
+    ]
+    if "is_favorite" in columns:
+        conn.close()
+        return
+
+    log.info("Migrating rating to integer + favorites")
+    conn.execute(
+        "ALTER TABLE books ADD COLUMN"
+        " is_favorite INTEGER DEFAULT 0"
+    )
+    conn.execute(
+        "UPDATE books SET is_favorite = 1"
+        " WHERE rating = 5.0"
+    )
+    conn.execute(
+        "UPDATE books SET rating ="
+        " CAST(rating AS INTEGER)"
+        " WHERE rating IS NOT NULL"
+    )
+    conn.execute(
+        "UPDATE books SET rating = 5, is_favorite = 0"
+        " WHERE series = 'The Expanse'"
+    )
+    conn.execute(
+        "UPDATE books SET rating = 5, is_favorite = 0"
+        " WHERE series = 'The Foreworld Saga'"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_books_favorite"
+        " ON books(user_id, is_favorite)"
+    )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_series_data_hash() -> None:
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(series_link)"
+        ).fetchall()
+    ]
+    if "data_hash" in columns:
+        conn.close()
+        return
+
+    log.info("Adding data_hash to series_link")
+    conn.execute(
+        "ALTER TABLE series_link ADD COLUMN data_hash TEXT"
+    )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_is_owned() -> None:
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(books)"
+        ).fetchall()
+    ]
+    if "is_owned" not in columns:
+        log.info("Adding is_owned column to books")
+        conn.execute(
+            "ALTER TABLE books ADD COLUMN"
+            " is_owned INTEGER DEFAULT 1"
+        )
+        conn.execute(
+            "UPDATE books SET is_owned = 1"
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_books_owned"
+        " ON books(user_id, is_owned)"
+    )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_missing_to_books() -> None:
+    """Convert missing series entries to unowned book records.
+
+    Finds all series_entries with status='missing' and no book_id,
+    creates book records for them, and updates status to 'linked'.
+    Also updates any existing 'owned' status to 'linked'.
+    """
+    conn = get_db()
+
+    # Skip if status column no longer exists (post global-series)
+    se_cols = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(series_entries)"
+        ).fetchall()
+    ]
+    if "status" not in se_cols:
+        conn.close()
+        return
+
+    # Check if there are any entries to migrate
+    missing = conn.execute(
+        """SELECT se.id, se.position, se.title, se.author,
+                  sl.user_id, sl.series_name
+           FROM series_entries se
+           JOIN series_link sl ON se.series_link_id = sl.id
+           WHERE se.status = 'missing' AND se.book_id IS NULL"""
+    ).fetchall()
+
+    if not missing:
+        # Still update owned -> linked for consistency
+        updated = conn.execute(
+            "UPDATE series_entries SET status = 'linked'"
+            " WHERE status = 'owned'"
+        ).rowcount
+        if updated:
+            log.info(
+                "Migrated %d series entries from"
+                " 'owned' to 'linked'",
+                updated,
+            )
+        conn.commit()
+        conn.close()
+        return
+
+    log.info(
+        "Migrating %d missing series entries to book records",
+        len(missing),
+    )
+
+    for row in missing:
+        entry = {
+            "title": row["title"],
+            "author": row["author"],
+            "position": row["position"],
+        }
+        book_id = ensure_book_for_entry(
+            conn,
+            row["user_id"],
+            row["series_name"],
+            entry,
+        )
+        conn.execute(
+            "UPDATE series_entries"
+            " SET book_id = ?, status = 'linked'"
+            " WHERE id = ?",
+            (book_id, row["id"]),
+        )
+
+    # Update all 'owned' to 'linked'
+    conn.execute(
+        "UPDATE series_entries SET status = 'linked'"
+        " WHERE status = 'owned'"
+    )
+
+    conn.commit()
+    conn.close()
+    log.info("Migration complete")
+
+
+def _migrate_drop_date_started() -> None:
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(books)"
+        ).fetchall()
+    ]
+    if "date_started" not in columns:
+        conn.close()
+        return
+
+    log.info("Dropping unused date_started column")
+    conn.execute("ALTER TABLE books DROP COLUMN date_started")
+    conn.commit()
+    conn.close()
+
+
+def _migrate_series_link_id() -> None:
+    """Add series_link_id FK to books, rebuild series_link table.
+
+    Makes HC fields nullable, drops UNIQUE(user_id, series_name),
+    backfills series_link_id from series_entries, and creates
+    stub series_link rows for orphan books with a series.
+    """
+    conn = get_db()
+
+    # Check if books already has series_link_id column
+    book_cols = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(books)"
+        ).fetchall()
+    ]
+    if "series_link_id" in book_cols:
+        conn.close()
+        return
+
+    log.info("Migrating: adding series_link_id to books")
+
+    # Rebuild series_link: HC fields nullable, no UNIQUE
+    # executescript runs in autocommit, so PRAGMA must be inside
+    conn.executescript("""
+        PRAGMA foreign_keys=OFF;
+        CREATE TABLE series_link_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            series_name TEXT NOT NULL,
+            hardcover_series_id INTEGER,
+            hardcover_series_name TEXT,
+            hardcover_slug TEXT,
+            last_checked TEXT,
+            data_hash TEXT,
+            monitored INTEGER NOT NULL DEFAULT 1
+        );
+        INSERT INTO series_link_new
+            (id, user_id, series_name, hardcover_series_id,
+             hardcover_series_name, hardcover_slug,
+             last_checked, data_hash)
+            SELECT id, user_id, series_name,
+                   hardcover_series_id,
+                   hardcover_series_name, hardcover_slug,
+                   last_checked, data_hash
+            FROM series_link;
+        DROP TABLE series_link;
+        ALTER TABLE series_link_new
+            RENAME TO series_link;
+        PRAGMA foreign_keys=ON;
+    """)
+
+    # Add column + index to books
+    conn.execute(
+        "ALTER TABLE books ADD COLUMN series_link_id"
+        " INTEGER REFERENCES series_link(id)"
+        " ON DELETE SET NULL"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_books_series_link"
+        " ON books(series_link_id)"
+    )
+
+    # Backfill from series_entries (unambiguous HC-matched)
+    conn.execute("""
+        UPDATE books SET series_link_id = (
+            SELECT se.series_link_id
+            FROM series_entries se
+            WHERE se.book_id = books.id
+            LIMIT 1
+        ) WHERE EXISTS (
+            SELECT 1 FROM series_entries se
+            WHERE se.book_id = books.id
+        )
+    """)
+
+    # Create stub series_link rows for orphan books
+    orphan_groups = conn.execute("""
+        SELECT DISTINCT user_id, series
+        FROM books
+        WHERE series IS NOT NULL
+            AND series_link_id IS NULL
+    """).fetchall()
+
+    for row in orphan_groups:
+        uid, sname = row[0], row[1]
+        cursor = conn.execute(
+            """INSERT INTO series_link
+               (user_id, series_name)
+               VALUES (?, ?)""",
+            (uid, sname),
+        )
+        new_link_id = cursor.lastrowid
+        conn.execute(
+            """UPDATE books
+               SET series_link_id = ?
+               WHERE user_id = ?
+                   AND series = ?
+                   AND series_link_id IS NULL""",
+            (new_link_id, uid, sname),
+        )
+
+    conn.commit()
+    conn.close()
+    log.info("Migration complete: series_link_id added")
+
+
+def _migrate_cover_updated_at() -> None:
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(books)"
+        ).fetchall()
+    ]
+    if "cover_updated_at" in columns:
+        conn.close()
+        return
+
+    log.info("Adding cover_updated_at column to books")
+    conn.execute(
+        "ALTER TABLE books ADD COLUMN cover_updated_at TEXT"
+    )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_published_date() -> None:
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(books)"
+        ).fetchall()
+    ]
+    if "published_date" in columns:
+        conn.close()
+        return
+
+    log.info("Adding published_date column to books")
+    conn.execute(
+        "ALTER TABLE books ADD COLUMN published_date TEXT"
+    )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_series_monitored() -> None:
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(series_link)"
+        ).fetchall()
+    ]
+    if "monitored" in columns or "user_id" not in columns:
+        conn.close()
+        return
+
+    log.info("Adding monitored column to series_link")
+    conn.execute(
+        "ALTER TABLE series_link ADD COLUMN"
+        " monitored INTEGER NOT NULL DEFAULT 1"
+    )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_global_series() -> None:
+    """Migrate series data to global model.
+
+    Removes user_id/monitored from series_link, removes
+    status/book_id from series_entries, creates user_series
+    and user_entry_status tables.
+    """
+    conn = get_db()
+
+    # Guard: skip if already migrated
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(series_link)"
+        ).fetchall()
+    ]
+    if "user_id" not in columns:
+        conn.close()
+        return
+
+    log.info("Migrating series to global model")
+
+    # 1. Create new tables
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_series (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            series_link_id INTEGER NOT NULL
+                REFERENCES series_link(id)
+                ON DELETE CASCADE,
+            monitored INTEGER NOT NULL DEFAULT 1,
+            display_name TEXT,
+            UNIQUE(user_id, series_link_id)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_entry_status (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            series_entry_id INTEGER NOT NULL
+                REFERENCES series_entries(id)
+                ON DELETE CASCADE,
+            status TEXT NOT NULL
+                CHECK(status IN ('linked', 'ignored')),
+            UNIQUE(user_id, series_entry_id)
+        )
+    """)
+    conn.commit()
+
+    # 2. Deduplicate by hardcover_series_id
+    groups = conn.execute("""
+        SELECT hardcover_series_id,
+               GROUP_CONCAT(id) as ids
+        FROM series_link
+        WHERE hardcover_series_id IS NOT NULL
+        GROUP BY hardcover_series_id
+        HAVING COUNT(*) > 1
+    """).fetchall()
+
+    for group in groups:
+        ids = [int(x) for x in group["ids"].split(",")]
+        placeholders = ",".join("?" * len(ids))
+
+        # Pick canonical: most recent last_checked
+        canonical_id = conn.execute(
+            f"""SELECT id FROM series_link
+                WHERE id IN ({placeholders})
+                ORDER BY last_checked DESC, id DESC
+                LIMIT 1""",
+            ids,
+        ).fetchone()["id"]
+
+        all_rows = conn.execute(
+            f"""SELECT id, user_id, monitored
+                FROM series_link
+                WHERE id IN ({placeholders})""",
+            ids,
+        ).fetchall()
+
+        for row in all_rows:
+            conn.execute(
+                """INSERT OR IGNORE INTO user_series
+                   (user_id, series_link_id, monitored)
+                   VALUES (?, ?, ?)""",
+                (row["user_id"], canonical_id,
+                 row["monitored"]),
+            )
+            if row["id"] != canonical_id:
+                conn.execute(
+                    """UPDATE books
+                       SET series_link_id = ?
+                       WHERE series_link_id = ?""",
+                    (canonical_id, row["id"]),
+                )
+                conn.execute(
+                    "DELETE FROM series_link WHERE id = ?",
+                    (row["id"],),
+                )
+
+    # 3. Deduplicate unlinked by LOWER(series_name)
+    groups = conn.execute("""
+        SELECT LOWER(series_name) as name_lower,
+               GROUP_CONCAT(id) as ids
+        FROM series_link
+        WHERE hardcover_series_id IS NULL
+        GROUP BY LOWER(series_name)
+        HAVING COUNT(*) > 1
+    """).fetchall()
+
+    for group in groups:
+        ids = [int(x) for x in group["ids"].split(",")]
+        placeholders = ",".join("?" * len(ids))
+        canonical_id = ids[0]
+
+        all_rows = conn.execute(
+            f"""SELECT id, user_id, monitored
+                FROM series_link
+                WHERE id IN ({placeholders})""",
+            ids,
+        ).fetchall()
+
+        for row in all_rows:
+            conn.execute(
+                """INSERT OR IGNORE INTO user_series
+                   (user_id, series_link_id, monitored)
+                   VALUES (?, ?, ?)""",
+                (row["user_id"], canonical_id,
+                 row["monitored"]),
+            )
+            if row["id"] != canonical_id:
+                conn.execute(
+                    """UPDATE books
+                       SET series_link_id = ?
+                       WHERE series_link_id = ?""",
+                    (canonical_id, row["id"]),
+                )
+                conn.execute(
+                    "DELETE FROM series_link WHERE id = ?",
+                    (row["id"],),
+                )
+
+    # 4. Populate user_series for remaining
+    conn.execute("""
+        INSERT OR IGNORE INTO user_series
+            (user_id, series_link_id, monitored)
+        SELECT user_id, id, monitored
+        FROM series_link
+    """)
+    conn.commit()
+
+    # 5. Populate user_entry_status for non-default statuses
+    conn.execute("""
+        INSERT OR IGNORE INTO user_entry_status
+            (user_id, series_entry_id, status)
+        SELECT sl.user_id, se.id, se.status
+        FROM series_entries se
+        JOIN series_link sl ON se.series_link_id = sl.id
+        WHERE se.status IN ('linked', 'ignored')
+          AND se.status != CASE
+              WHEN se.position = CAST(se.position AS INTEGER)
+              THEN 'linked' ELSE 'ignored' END
+    """)
+    conn.commit()
+
+    # 6-7. Rebuild tables without removed columns
+    conn.executescript("""
+        PRAGMA foreign_keys=OFF;
+
+        CREATE TABLE series_link_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            series_name TEXT NOT NULL,
+            hardcover_series_id INTEGER,
+            hardcover_series_name TEXT,
+            hardcover_slug TEXT,
+            last_checked TEXT,
+            data_hash TEXT
+        );
+        INSERT INTO series_link_new
+            (id, series_name, hardcover_series_id,
+             hardcover_series_name, hardcover_slug,
+             last_checked, data_hash)
+        SELECT id, series_name, hardcover_series_id,
+               hardcover_series_name, hardcover_slug,
+               last_checked, data_hash
+        FROM series_link;
+        DROP TABLE series_link;
+        ALTER TABLE series_link_new
+            RENAME TO series_link;
+
+        CREATE TABLE series_entries_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            series_link_id INTEGER NOT NULL
+                REFERENCES series_link(id)
+                ON DELETE CASCADE,
+            position REAL NOT NULL,
+            title TEXT NOT NULL,
+            author TEXT,
+            hardcover_book_id INTEGER
+        );
+        INSERT INTO series_entries_new
+            (id, series_link_id, position, title,
+             author, hardcover_book_id)
+        SELECT id, series_link_id, position, title,
+               author, hardcover_book_id
+        FROM series_entries;
+        DROP TABLE series_entries;
+        ALTER TABLE series_entries_new
+            RENAME TO series_entries;
+
+        CREATE INDEX idx_series_entries_link
+            ON series_entries(series_link_id);
+        CREATE INDEX idx_series_entries_position
+            ON series_entries(series_link_id, position);
+        CREATE INDEX idx_user_series
+            ON user_series(user_id, series_link_id);
+        CREATE INDEX idx_user_entry_status
+            ON user_entry_status(user_id, series_entry_id);
+
+        PRAGMA foreign_keys=ON;
+    """)
+
+    conn.close()
+    log.info("Global series migration complete")
+
+
+def _migrate_user_libraries() -> None:
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(users)"
+        ).fetchall()
+    ]
+    if "libraries" in columns:
+        conn.close()
+        return
+
+    log.info("Adding libraries column to users")
+    conn.execute(
+        "ALTER TABLE users ADD COLUMN libraries TEXT"
+    )
+
+    # Seed defaults
+    jcpl = json.dumps([
+        {"name": "JCPL", "url": "jefferson.overdrive.com"},
+    ])
+    dpl_jcpl = json.dumps([
+        {"name": "DPL", "url": "denver.overdrive.com"},
+        {"name": "JCPL", "url": "jefferson.overdrive.com"},
+    ])
+    conn.execute(
+        "UPDATE users SET libraries = ?"
+        " WHERE username = 'andy'",
+        (jcpl,),
+    )
+    conn.execute(
+        "UPDATE users SET libraries = ?"
+        " WHERE username IN ('ada', 'liz')",
+        (dpl_jcpl,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_superusers() -> None:
+    """Ensure andy and liz are superusers."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE users SET is_superuser = 1"
+        " WHERE username IN ('andy', 'liz')"
+        " AND is_superuser = 0"
+    )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_archive_user() -> None:
+    """Create the archive pseudo-user if it doesn't exist."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT id FROM users WHERE username = 'archive'"
+    ).fetchone()
+    if row:
+        conn.close()
+        return
+    log.info("Creating archive user")
+    conn.execute(
+        "INSERT INTO users (username, display_name,"
+        " password_hash)"
+        " VALUES ('archive', 'Archive', '!')"
+    )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_series_ignored() -> None:
+    """Add per-book series_ignored flag.
+
+    Replaces entry-level ignore filtering with book-level.
+    Converts existing entry-level ignores (both explicit via
+    user_entry_status and default non-integer position) to
+    series_ignored=1 on the corresponding books.
+    """
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(books)"
+        ).fetchall()
+    ]
+    if "series_ignored" in columns:
+        conn.close()
+        return
+
+    log.info("Adding series_ignored column to books")
+    conn.execute(
+        "ALTER TABLE books ADD COLUMN"
+        " series_ignored INTEGER DEFAULT 0"
+    )
+
+    # Convert explicit entry-level ignores to book-level
+    conn.execute("""
+        UPDATE books SET series_ignored = 1
+        WHERE id IN (
+            SELECT b.id FROM books b
+            JOIN series_entries se
+                ON se.series_link_id = b.series_link_id
+                AND se.position = b.series_index
+            JOIN user_entry_status ues
+                ON ues.series_entry_id = se.id
+                AND ues.user_id = b.user_id
+            WHERE ues.status = 'ignored'
+        )
+    """)
+
+    # Convert default non-integer-position ignores
+    conn.execute("""
+        UPDATE books SET series_ignored = 1
+        WHERE id IN (
+            SELECT b.id FROM books b
+            JOIN series_entries se
+                ON se.series_link_id = b.series_link_id
+                AND se.position = b.series_index
+            LEFT JOIN user_entry_status ues
+                ON ues.series_entry_id = se.id
+                AND ues.user_id = b.user_id
+            WHERE ues.status IS NULL
+                AND se.position
+                    != CAST(se.position AS INTEGER)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def update_user_libraries(
+    user_id: int, libraries_json: str
+) -> None:
+    """Update the libraries JSON for a user."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE users SET libraries = ? WHERE id = ?",
+        (libraries_json, user_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+# --- Password helpers ---
+
+
+def hash_password(password: str) -> str:
+    """Hash a password with bcrypt."""
+    return bcrypt.hashpw(
+        password.encode("utf-8"), bcrypt.gensalt()
+    ).decode("utf-8")
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    """Check password against stored hash.
+
+    Supports both bcrypt ($2b$ prefix) and legacy SHA-256 hashes.
+    """
+    if stored_hash.startswith("$2b$"):
+        return bcrypt.checkpw(
+            password.encode("utf-8"),
+            stored_hash.encode("utf-8"),
+        )
+    # Legacy: SHA-256 with static salt
+    legacy = hashlib.sha256(
+        (password + "books_salt").encode("utf-8")
+    ).hexdigest()
+    return legacy == stored_hash
+
+
+def set_password_hash(user_id: int, password_hash: str) -> None:
+    """Update the password_hash column for a user."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE users SET password_hash = ? WHERE id = ?",
+        (password_hash, user_id),
+    )
+    conn.commit()
+    conn.close()
 
 
 # --- User queries ---
@@ -143,15 +1060,21 @@ def get_books(
     user_id: int,
     q: str | None = None,
     series: str | None = None,
-    is_read: int | None = None,
-    min_rating: float | None = None,
-    max_rating: float | None = None,
+    reading_status: str | None = None,
+    min_rating: int | None = None,
+    max_rating: int | None = None,
+    is_favorite: bool | None = None,
+    is_owned: bool | None = None,
+    has_series: bool | None = None,
+    rated: bool | None = None,
     sort: str = "title",
     order: str = "asc",
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict]:
-    conditions = ["user_id = ?"]
+    conditions = [
+        "user_id = ?", "series_ignored = 0",
+    ]
     params: list = [user_id]
 
     if q:
@@ -165,9 +1088,9 @@ def get_books(
         conditions.append("series = ?")
         params.append(series)
 
-    if is_read is not None:
-        conditions.append("is_read = ?")
-        params.append(is_read)
+    if reading_status is not None:
+        conditions.append("reading_status = ?")
+        params.append(reading_status)
 
     if min_rating is not None:
         conditions.append("rating >= ?")
@@ -176,6 +1099,26 @@ def get_books(
     if max_rating is not None:
         conditions.append("rating <= ?")
         params.append(max_rating)
+
+    if is_favorite is not None:
+        conditions.append("is_favorite = ?")
+        params.append(1 if is_favorite else 0)
+
+    if is_owned is not None:
+        conditions.append("is_owned = ?")
+        params.append(1 if is_owned else 0)
+
+    if has_series is not None:
+        if has_series:
+            conditions.append("series IS NOT NULL")
+        else:
+            conditions.append("series IS NULL")
+
+    if rated is not None:
+        if rated:
+            conditions.append("rating IS NOT NULL")
+        else:
+            conditions.append("rating IS NULL")
 
     allowed_sort = {
         "title": "sort_title",
@@ -207,11 +1150,17 @@ def count_books(
     user_id: int,
     q: str | None = None,
     series: str | None = None,
-    is_read: int | None = None,
-    min_rating: float | None = None,
-    max_rating: float | None = None,
+    reading_status: str | None = None,
+    min_rating: int | None = None,
+    max_rating: int | None = None,
+    is_favorite: bool | None = None,
+    is_owned: bool | None = None,
+    has_series: bool | None = None,
+    rated: bool | None = None,
 ) -> int:
-    conditions = ["user_id = ?"]
+    conditions = [
+        "user_id = ?", "series_ignored = 0",
+    ]
     params: list = [user_id]
 
     if q:
@@ -225,9 +1174,9 @@ def count_books(
         conditions.append("series = ?")
         params.append(series)
 
-    if is_read is not None:
-        conditions.append("is_read = ?")
-        params.append(is_read)
+    if reading_status is not None:
+        conditions.append("reading_status = ?")
+        params.append(reading_status)
 
     if min_rating is not None:
         conditions.append("rating >= ?")
@@ -236,6 +1185,26 @@ def count_books(
     if max_rating is not None:
         conditions.append("rating <= ?")
         params.append(max_rating)
+
+    if is_favorite is not None:
+        conditions.append("is_favorite = ?")
+        params.append(1 if is_favorite else 0)
+
+    if is_owned is not None:
+        conditions.append("is_owned = ?")
+        params.append(1 if is_owned else 0)
+
+    if has_series is not None:
+        if has_series:
+            conditions.append("series IS NOT NULL")
+        else:
+            conditions.append("series IS NULL")
+
+    if rated is not None:
+        if rated:
+            conditions.append("rating IS NOT NULL")
+        else:
+            conditions.append("rating IS NULL")
 
     where = " AND ".join(conditions)
     query = f"SELECT COUNT(*) FROM books WHERE {where}"
@@ -258,6 +1227,107 @@ def get_book(book_id: int, user_id: int) -> dict | None:
     return _row_to_book(row)
 
 
+def find_unowned_match(
+    user_id: int,
+    title: str,
+    series_link_id: int | None = None,
+    series_index: float | None = None,
+) -> int | None:
+    """Find an existing unowned book matching the given criteria.
+
+    Checks series position first (if provided), then falls back
+    to case-insensitive title matching. Returns book_id or None.
+    """
+    conn = get_db()
+
+    # Match by series position (most reliable)
+    if series_link_id is not None and series_index is not None:
+        row = conn.execute(
+            """SELECT id FROM books
+               WHERE user_id = ? AND series_link_id = ?
+                   AND series_index = ? AND is_owned = 0
+               LIMIT 1""",
+            (user_id, series_link_id, series_index),
+        ).fetchone()
+        if row:
+            conn.close()
+            return row[0]
+
+    # Match by normalized title
+    norm_title = normalize_title(title)
+    rows = conn.execute(
+        "SELECT id, title FROM books"
+        " WHERE user_id = ? AND is_owned = 0",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+
+    for row in rows:
+        if normalize_title(row["title"]) == norm_title:
+            return row["id"]
+
+    return None
+
+
+def find_owned_match(
+    user_id: int,
+    title: str,
+    authors: str,
+    series_link_id: int | None = None,
+    series_index: float | None = None,
+) -> dict | None:
+    """Find an existing owned book matching the given criteria.
+
+    Checks series position first (if provided), then falls back
+    to normalized title + author first-token matching.
+    Returns full book dict or None.
+    """
+    conn = get_db()
+
+    # Tier 1: match by series position
+    if series_link_id is not None and series_index is not None:
+        row = conn.execute(
+            """SELECT * FROM books
+               WHERE user_id = ? AND series_link_id = ?
+                   AND series_index = ? AND is_owned = 1
+               LIMIT 1""",
+            (user_id, series_link_id, series_index),
+        ).fetchone()
+        if row:
+            conn.close()
+            return _row_to_book(row)
+
+    # Tier 2: normalized title + author first-token
+    norm_title = normalize_title(title)
+    # Extract first token from incoming author for comparison
+    author_first = authors.strip().split(",")[0].strip()
+    author_tokens = set(
+        t.lower() for t in author_first.split()
+    )
+
+    rows = conn.execute(
+        "SELECT * FROM books WHERE user_id = ? AND is_owned = 1",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+
+    for row in rows:
+        book = _row_to_book(row)
+        if normalize_title(book["title"]) != norm_title:
+            continue
+        # Compare author: check if any token from the new
+        # author appears in existing (handles "Gibson, William"
+        # vs "William Gibson")
+        existing_tokens = set(
+            t.lower() for t in book["authors"].split(",")[0]
+            .strip().split()
+        )
+        if author_tokens & existing_tokens:
+            return book
+
+    return None
+
+
 def insert_book(
     user_id: int,
     title: str,
@@ -274,24 +1344,33 @@ def insert_book(
     tags: list[str] | None,
     date_added: str,
     date_finished: str | None,
-    rating: float | None,
-    is_read: int,
+    rating: int | None,
+    reading_status: str = "unread",
+    progress: float | None = None,
+    is_favorite: int = 0,
+    is_owned: int = 1,
+    series_link_id: int | None = None,
+    published_date: str | None = None,
 ) -> int:
     tags_json = json.dumps(tags) if tags else "[]"
     conn = get_db()
     cursor = conn.execute(
         """INSERT INTO books (
             user_id, title, sort_title, authors, author_sort,
-            series, series_index, description, cover_filename,
+            series, series_index, series_link_id,
+            description, cover_filename,
             file_path, isbn, goodreads_id, tags, date_added,
-            date_finished, rating, is_read
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                  ?, ?)""",
+            date_finished, published_date, rating,
+            reading_status, progress, is_favorite, is_owned
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                  ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             user_id, title, sort_title, authors, author_sort,
-            series, series_index, description, cover_filename,
+            series, series_index, series_link_id,
+            description, cover_filename,
             file_path, isbn, goodreads_id, tags_json,
-            date_added, date_finished, rating, is_read,
+            date_added, date_finished, published_date, rating,
+            reading_status, progress, is_favorite, is_owned,
         ),
     )
     conn.commit()
@@ -309,11 +1388,23 @@ def update_book(
     if "tags" in updates and isinstance(updates["tags"], list):
         updates["tags"] = json.dumps(updates["tags"])
 
+    # Compat shim: map old is_read to reading_status
+    if "is_read" in updates and "reading_status" not in updates:
+        updates["reading_status"] = (
+            "read" if updates["is_read"] else "unread"
+        )
+    updates.pop("is_read", None)
+
     allowed = {
         "title", "sort_title", "authors", "author_sort",
-        "series", "series_index", "description",
-        "cover_filename", "file_path", "isbn", "goodreads_id",
-        "tags", "date_finished", "rating", "is_read",
+        "series", "series_index", "series_link_id",
+        "description",
+        "cover_filename", "cover_updated_at",
+        "file_path", "isbn", "goodreads_id",
+        "tags", "date_finished", "published_date",
+        "rating", "reading_status",
+        "progress", "is_favorite", "is_owned",
+        "series_ignored",
     }
     filtered = {
         k: v for k, v in updates.items() if k in allowed
@@ -348,38 +1439,769 @@ def delete_book(book_id: int, user_id: int) -> bool:
     return deleted
 
 
+def archive_book(
+    book_id: int, user_id: int, archive_user_id: int
+) -> bool:
+    """Transfer a book to the archive user.
+
+    Clears series_link_id since archive doesn't have
+    user_series subscriptions.
+    """
+    conn = get_db()
+    cursor = conn.execute(
+        "UPDATE books SET user_id = ?,"
+        " series_link_id = NULL"
+        " WHERE id = ? AND user_id = ?",
+        (archive_user_id, book_id, user_id),
+    )
+    conn.commit()
+    changed = cursor.rowcount > 0
+    conn.close()
+    return changed
+
+
 # --- Series queries ---
 
 
-def get_series_list(user_id: int) -> list[dict]:
+# Effective status SQL expression: uses user override if present,
+# otherwise defaults based on whether position is integer.
+_EFFECTIVE_STATUS = """COALESCE(ues.status,
+    CASE WHEN se.position = CAST(se.position AS INTEGER)
+    THEN 'linked' ELSE 'ignored' END)"""
+
+
+def _compute_default_status(position: float) -> str:
+    """Return default entry status based on position.
+
+    Integer positions default to 'linked' (shown).
+    Decimal positions default to 'ignored' (hidden).
+    """
+    if position == int(position):
+        return "linked"
+    return "ignored"
+
+
+def get_user_series(
+    user_id: int, series_link_id: int
+) -> dict | None:
+    """Get user's subscription to a series."""
+    conn = get_db()
+    row = conn.execute(
+        """SELECT * FROM user_series
+           WHERE user_id = ? AND series_link_id = ?""",
+        (user_id, series_link_id),
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return dict(row)
+
+
+def ensure_user_series(
+    user_id: int, series_link_id: int
+) -> None:
+    """Ensure user has a subscription to a series."""
+    conn = get_db()
+    conn.execute(
+        """INSERT OR IGNORE INTO user_series
+           (user_id, series_link_id)
+           VALUES (?, ?)""",
+        (user_id, series_link_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def ensure_user_books_for_series(
+    user_id: int,
+    series_link_id: int,
+    series_name: str,
+) -> None:
+    """Create unowned placeholder books for linked entries.
+
+    For each series entry with effective status 'linked' that
+    has no matching book for this user, creates an unowned
+    book record.
+    """
+    conn = get_db()
+    entries = conn.execute(
+        f"""SELECT se.id, se.position, se.title, se.author
+           FROM series_entries se
+           LEFT JOIN user_entry_status ues
+               ON ues.series_entry_id = se.id
+               AND ues.user_id = ?
+           WHERE se.series_link_id = ?
+               AND {_EFFECTIVE_STATUS} = 'linked'
+               AND NOT EXISTS (
+                   SELECT 1 FROM books b
+                   WHERE b.user_id = ?
+                       AND b.series_link_id = ?
+                       AND b.series_index = se.position
+               )""",
+        (user_id, series_link_id,
+         user_id, series_link_id),
+    ).fetchall()
+
+    for entry in entries:
+        ensure_book_for_entry(
+            conn, user_id, series_name,
+            {
+                "title": entry["title"],
+                "author": entry["author"],
+                "position": entry["position"],
+            },
+            series_link_id=series_link_id,
+        )
+
+    conn.commit()
+    conn.close()
+
+
+def sync_book_positions(
+    user_id: int, entries: list[dict]
+) -> None:
+    """Update books' series_index to match HC entry positions.
+
+    Called after match_books to sync matched library books
+    with their Hardcover positions.
+    """
+    conn = get_db()
+    for entry in entries:
+        if entry.get("book_id"):
+            conn.execute(
+                """UPDATE books SET series_index = ?
+                   WHERE id = ? AND user_id = ?""",
+                (entry["position"], entry["book_id"],
+                 user_id),
+            )
+    conn.commit()
+    conn.close()
+
+
+def get_series_list(
+    user_id: int,
+    monitored: bool | None = None,
+) -> list[dict]:
+    monitored_filter = ""
+    if monitored is not None:
+        monitored_filter = (
+            " AND us.monitored = 1"
+            if monitored
+            else " AND us.monitored = 0"
+        )
+
     conn = get_db()
     rows = conn.execute(
-        """SELECT series,
+        f"""SELECT b.series_link_id,
+                  COALESCE(us.display_name,
+                      sl.series_name) as series,
+                  us.monitored,
                   COUNT(*) as total_books,
-                  SUM(is_read) as read_count,
-                  COUNT(*) - SUM(is_read) as unread_count,
-                  MIN(rating) as min_rating,
-                  MAX(rating) as max_rating,
-                  AVG(rating) as avg_rating
-           FROM books
-           WHERE user_id = ? AND series IS NOT NULL
-           GROUP BY series
-           ORDER BY series""",
+                  SUM(CASE WHEN b.reading_status = 'read'
+                      THEN 1 ELSE 0 END) as read_count,
+                  COUNT(*) - SUM(CASE WHEN b.reading_status
+                      = 'read' THEN 1 ELSE 0 END)
+                      as unread_count,
+                  SUM(CASE WHEN b.reading_status = 'reading'
+                      THEN 1 ELSE 0 END) as reading_count,
+                  SUM(CASE WHEN b.is_owned = 0
+                      THEN 1 ELSE 0 END) as not_owned_count,
+                  SUM(CASE WHEN b.is_owned = 0
+                      AND b.reading_status NOT IN
+                          ('read', 'reading')
+                      THEN 1 ELSE 0 END)
+                      as not_owned_unread_count,
+                  MIN(CASE WHEN b.is_owned = 1
+                      THEN b.rating END) as min_rating,
+                  MAX(CASE WHEN b.is_owned = 1
+                      THEN b.rating END) as max_rating,
+                  AVG(CASE WHEN b.is_owned = 1
+                      THEN b.rating END) as avg_rating,
+                  (SELECT b2.authors FROM books b2
+                   WHERE b2.series_link_id
+                       = b.series_link_id
+                       AND b2.user_id = b.user_id
+                       AND b2.is_owned = 1
+                       AND b2.series_ignored = 0
+                   GROUP BY b2.authors
+                   ORDER BY COUNT(*) DESC
+                   LIMIT 1) as authors,
+                  (SELECT b2.author_sort FROM books b2
+                   WHERE b2.series_link_id
+                       = b.series_link_id
+                       AND b2.user_id = b.user_id
+                       AND b2.is_owned = 1
+                       AND b2.series_ignored = 0
+                   GROUP BY b2.author_sort
+                   ORDER BY COUNT(*) DESC
+                   LIMIT 1) as author_sort
+           FROM books b
+           JOIN series_link sl
+               ON b.series_link_id = sl.id
+           JOIN user_series us
+               ON us.series_link_id = sl.id
+               AND us.user_id = ?
+           WHERE b.user_id = ?
+               AND b.series_ignored = 0
+               {monitored_filter}
+           GROUP BY b.series_link_id
+           HAVING COUNT(*) > 1
+           ORDER BY COALESCE(us.display_name,
+               sl.series_name)""",
+        (user_id, user_id),
+    ).fetchall()
+    series_list = [dict(r) for r in rows]
+
+    # Build ordered status/ownership sequences for segment bars
+    book_rows = conn.execute(
+        """SELECT b.series_link_id,
+                  CASE b.reading_status
+                      WHEN 'read' THEN 'r'
+                      WHEN 'reading' THEN 'b'
+                      ELSE 'u'
+                  END as status_char,
+                  CASE WHEN b.is_owned = 1
+                      THEN '1' ELSE '0'
+                  END as owned_char
+           FROM books b
+           LEFT JOIN series_entries se
+               ON se.series_link_id = b.series_link_id
+               AND se.position = b.series_index
+           WHERE b.user_id = ?
+               AND b.series_link_id IS NOT NULL
+               AND b.series_ignored = 0
+           ORDER BY b.series_link_id,
+               COALESCE(se.position,
+                   b.series_index, 999)""",
         (user_id,),
+    ).fetchall()
+    conn.close()
+
+    seqs: dict[int, tuple[list[str], list[str]]] = {}
+    for r in book_rows:
+        s, o = seqs.setdefault(
+            r["series_link_id"], ([], [])
+        )
+        s.append(r["status_char"])
+        o.append(r["owned_char"])
+
+    for s in series_list:
+        pair = seqs.get(s["series_link_id"], ([], []))
+        s["status_seq"] = "".join(pair[0])
+        s["owned_seq"] = "".join(pair[1])
+
+    return series_list
+
+
+def get_series_autocomplete(user_id: int) -> list[dict]:
+    """Get all series with authors and book indices for autocomplete."""
+    conn = get_db()
+    series_rows = conn.execute(
+        """SELECT sl.id,
+                  COALESCE(us.display_name,
+                      sl.series_name) as series_name,
+                  (SELECT b2.authors FROM books b2
+                   WHERE b2.series_link_id = sl.id
+                       AND b2.user_id = ?
+                   GROUP BY b2.authors
+                   ORDER BY COUNT(*) DESC
+                   LIMIT 1) as authors
+           FROM series_link sl
+           JOIN user_series us
+               ON us.series_link_id = sl.id
+               AND us.user_id = ?
+           ORDER BY COALESCE(us.display_name,
+               sl.series_name)""",
+        (user_id, user_id),
+    ).fetchall()
+    book_rows = conn.execute(
+        """SELECT series_link_id, series_index, title
+           FROM books
+           WHERE user_id = ?
+             AND series_link_id IS NOT NULL
+           ORDER BY series_link_id, series_index""",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+
+    books_by_series: dict[int, list[dict]] = {}
+    for r in book_rows:
+        sid = r["series_link_id"]
+        books_by_series.setdefault(sid, []).append({
+            "index": r["series_index"],
+            "title": r["title"],
+        })
+
+    return [
+        {
+            "id": r["id"],
+            "name": r["series_name"],
+            "authors": r["authors"] or "",
+            "books": books_by_series.get(r["id"], []),
+        }
+        for r in series_rows
+    ]
+
+
+def get_series_books(
+    user_id: int, series_link_id: int
+) -> list[dict]:
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT b.*, se.position as hc_position
+           FROM books b
+           LEFT JOIN series_entries se
+               ON se.series_link_id = b.series_link_id
+               AND se.position = b.series_index
+           WHERE b.user_id = ?
+               AND b.series_link_id = ?
+               AND b.series_ignored = 0
+           ORDER BY COALESCE(se.position,
+               b.series_index)""",
+        (user_id, series_link_id),
+    ).fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        book = _row_to_book(r)
+        book["hc_position"] = r["hc_position"]
+        result.append(book)
+    return result
+
+
+# --- Series link queries ---
+
+
+def get_series_link(series_name: str) -> dict | None:
+    """Find a series_link by name (global, not per-user)."""
+    conn = get_db()
+    row = conn.execute(
+        """SELECT * FROM series_link
+           WHERE series_name = ?
+           LIMIT 1""",
+        (series_name,),
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return dict(row)
+
+
+def get_series_link_by_id(
+    series_link_id: int,
+) -> dict | None:
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM series_link WHERE id = ?",
+        (series_link_id,),
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return dict(row)
+
+
+def get_or_create_series_link(
+    user_id: int, series_name: str
+) -> int:
+    """Find or create a global series_link, ensure user subscription."""
+    conn = get_db()
+    row = conn.execute(
+        """SELECT id FROM series_link
+           WHERE series_name = ?
+           LIMIT 1""",
+        (series_name,),
+    ).fetchone()
+    if row:
+        link_id = row[0]
+    else:
+        cursor = conn.execute(
+            "INSERT INTO series_link (series_name)"
+            " VALUES (?)",
+            (series_name,),
+        )
+        link_id = cursor.lastrowid
+
+    # Ensure user subscription
+    conn.execute(
+        """INSERT OR IGNORE INTO user_series
+           (user_id, series_link_id)
+           VALUES (?, ?)""",
+        (user_id, link_id),
+    )
+    conn.commit()
+    conn.close()
+    return link_id
+
+
+def link_series(
+    series_link_id: int,
+    hc_series_id: int,
+    hc_series_name: str,
+    data_hash: str | None = None,
+    hardcover_slug: str | None = None,
+) -> None:
+    conn = get_db()
+    conn.execute(
+        """UPDATE series_link SET
+               hardcover_series_id = ?,
+               hardcover_series_name = ?,
+               hardcover_slug = ?,
+               last_checked = datetime('now'),
+               data_hash = ?
+           WHERE id = ?""",
+        (
+            hc_series_id, hc_series_name, hardcover_slug,
+            data_hash, series_link_id,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def ensure_book_for_entry(
+    conn: sqlite3.Connection,
+    user_id: int,
+    series_name: str,
+    entry: dict,
+    series_link_id: int | None = None,
+) -> int:
+    """Ensure a books row exists for a series entry.
+
+    If entry already has a book_id, returns it. Otherwise checks
+    for an existing is_owned=0 book with matching title+series,
+    or inserts a new one. Returns the book_id.
+    """
+    if entry.get("book_id"):
+        return entry["book_id"]
+
+    # Check for existing unowned book with same title+series
+    row = conn.execute(
+        """SELECT id FROM books
+           WHERE user_id = ? AND series = ?
+               AND title = ? AND is_owned = 0""",
+        (user_id, series_name, entry["title"]),
+    ).fetchone()
+    if row:
+        return row[0]
+
+    # Insert new unowned book
+    now = datetime.now(timezone.utc).isoformat()
+    author = entry.get("author", "Unknown")
+    cursor = conn.execute(
+        """INSERT INTO books (
+            user_id, title, sort_title, authors, author_sort,
+            series, series_index, series_link_id,
+            description, cover_filename,
+            file_path, isbn, goodreads_id, tags, date_added,
+            date_finished, rating, reading_status, is_owned
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                  ?, ?, ?, ?, ?)""",
+        (
+            user_id,
+            entry["title"],
+            make_sort_title(entry["title"]),
+            author,
+            make_author_sort(author),
+            series_name,
+            entry.get("position"),
+            series_link_id,
+            None,  # description
+            None,  # cover_filename
+            None,  # file_path
+            None,  # isbn
+            None,  # goodreads_id
+            "[]",  # tags
+            now,
+            None,  # date_finished
+            None,  # rating
+            "unread",
+            0,  # is_owned
+        ),
+    )
+    return cursor.lastrowid
+
+
+def upsert_series_entries(
+    series_link_id: int,
+    entries: list[dict],
+) -> None:
+    """Upsert global series entries, preserving IDs.
+
+    Matches incoming entries to existing ones by
+    hardcover_book_id so that entry IDs are stable across
+    position changes (protects user_entry_status FKs).
+    Only stores global data (no status, no book_id).
+    """
+    conn = get_db()
+
+    existing = conn.execute(
+        """SELECT id, position, hardcover_book_id
+           FROM series_entries
+           WHERE series_link_id = ?""",
+        (series_link_id,),
+    ).fetchall()
+
+    existing_by_hc_id: dict[int, int] = {}
+    for row in existing:
+        hc_id = row["hardcover_book_id"]
+        if hc_id:
+            existing_by_hc_id[hc_id] = row["id"]
+
+    seen_ids: set[int] = set()
+    for entry in entries:
+        hc_id = entry.get("hardcover_book_id")
+        existing_id = (
+            existing_by_hc_id.get(hc_id)
+            if hc_id else None
+        )
+
+        if existing_id:
+            seen_ids.add(existing_id)
+            conn.execute(
+                """UPDATE series_entries
+                   SET position = ?, title = ?,
+                       author = ?,
+                       hardcover_book_id = ?
+                   WHERE id = ?""",
+                (
+                    entry["position"],
+                    entry["title"],
+                    entry.get("author"),
+                    hc_id,
+                    existing_id,
+                ),
+            )
+        else:
+            cursor = conn.execute(
+                """INSERT INTO series_entries
+                   (series_link_id, position, title,
+                    author, hardcover_book_id)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (
+                    series_link_id,
+                    entry["position"],
+                    entry["title"],
+                    entry.get("author"),
+                    entry.get("hardcover_book_id"),
+                ),
+            )
+            seen_ids.add(cursor.lastrowid)
+
+    # DELETE entries no longer present
+    for row in existing:
+        if row["id"] not in seen_ids:
+            conn.execute(
+                "DELETE FROM series_entries WHERE id = ?",
+                (row["id"],),
+            )
+
+    conn.commit()
+    conn.close()
+
+
+def get_series_entries(series_link_id: int) -> list[dict]:
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT * FROM series_entries
+           WHERE series_link_id = ?
+           ORDER BY position""",
+        (series_link_id,),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
-def get_series_books(
-    user_id: int, series_name: str
+# --- Raw Hardcover data storage ---
+
+
+def store_hc_series_books(
+    series_link_id: int, raw_entries: list[dict]
+) -> None:
+    """Replace all raw HC entries for a series link."""
+    conn = get_db()
+    conn.execute(
+        "DELETE FROM hc_series_books"
+        " WHERE series_link_id = ?",
+        (series_link_id,),
+    )
+    for entry in raw_entries:
+        conn.execute(
+            """INSERT INTO hc_series_books
+               (series_link_id, position, title, author,
+                hardcover_book_id, featured, compilation,
+                ratings_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                series_link_id,
+                entry.get("position"),
+                entry["title"],
+                entry.get("author"),
+                entry.get("hardcover_book_id"),
+                1 if entry.get("featured") else 0,
+                1 if entry.get("compilation") else 0,
+                entry.get("ratings_count", 0),
+            ),
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_hc_series_books(
+    series_link_id: int,
 ) -> list[dict]:
+    """Retrieve all raw HC entries for a series link."""
     conn = get_db()
     rows = conn.execute(
-        """SELECT * FROM books
-           WHERE user_id = ? AND series = ?
-           ORDER BY series_index""",
-        (user_id, series_name),
+        """SELECT * FROM hc_series_books
+           WHERE series_link_id = ?
+           ORDER BY position""",
+        (series_link_id,),
     ).fetchall()
     conn.close()
-    return [_row_to_book(r) for r in rows]
+    return [dict(r) for r in rows]
+
+
+def get_series_entries_with_books(
+    series_link_id: int,
+    user_id: int,
+) -> list[dict]:
+    """Get all series entries with per-user book data.
+
+    Returns all entries including ignored ones, with linked
+    book details via position-based join and computed
+    effective status. Ordered by series_entries.position.
+    """
+    conn = get_db()
+    rows = conn.execute(
+        f"""SELECT se.id as entry_id,
+                  se.position,
+                  se.title as hc_title,
+                  se.author as hc_author,
+                  {_EFFECTIVE_STATUS} as entry_status,
+                  b.id as book_id,
+                  b.title as book_title,
+                  b.authors as book_authors,
+                  b.cover_filename
+                      as book_cover_filename,
+                  b.cover_updated_at
+                      as book_cover_updated_at,
+                  b.user_id as book_user_id,
+                  b.reading_status
+                      as book_reading_status,
+                  b.is_owned as book_is_owned,
+                  b.rating as book_rating,
+                  COALESCE(b.series_ignored, 0)
+                      as book_ignored
+           FROM series_entries se
+           LEFT JOIN books b
+               ON b.series_link_id
+                   = se.series_link_id
+               AND b.series_index = se.position
+               AND b.user_id = ?
+           LEFT JOIN user_entry_status ues
+               ON ues.series_entry_id = se.id
+               AND ues.user_id = ?
+           WHERE se.series_link_id = ?
+           ORDER BY se.position""",
+        (user_id, user_id, series_link_id),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def update_series_display_name(
+    user_id: int,
+    series_link_id: int,
+    new_name: str,
+) -> None:
+    """Update per-user display name and user's books."""
+    conn = get_db()
+    conn.execute(
+        """UPDATE user_series SET display_name = ?
+           WHERE user_id = ? AND series_link_id = ?""",
+        (new_name, user_id, series_link_id),
+    )
+    conn.execute(
+        """UPDATE books SET series = ?
+           WHERE series_link_id = ? AND user_id = ?""",
+        (new_name, series_link_id, user_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_series_monitored(
+    user_id: int,
+    series_link_id: int,
+    monitored: bool,
+) -> None:
+    """Set the monitored flag on user's series subscription."""
+    conn = get_db()
+    conn.execute(
+        """UPDATE user_series SET monitored = ?
+           WHERE user_id = ? AND series_link_id = ?""",
+        (1 if monitored else 0, user_id, series_link_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_series_entry(
+    user_id: int,
+    entry_id: int,
+    position: float,
+    status: str,
+) -> None:
+    """Update position (global) and status (per-user).
+
+    Position changes update the entry and all books at the
+    old position. Status changes upsert/delete per-user
+    overrides in user_entry_status.
+    """
+    conn = get_db()
+
+    # Position update is global
+    old = conn.execute(
+        """SELECT position, series_link_id
+           FROM series_entries WHERE id = ?""",
+        (entry_id,),
+    ).fetchone()
+    if old and old["position"] != position:
+        conn.execute(
+            "UPDATE series_entries SET position = ?"
+            " WHERE id = ?",
+            (position, entry_id),
+        )
+        # Sync all books at old position for this series
+        conn.execute(
+            """UPDATE books SET series_index = ?
+               WHERE series_link_id = ?
+                   AND series_index = ?""",
+            (position, old["series_link_id"],
+             old["position"]),
+        )
+
+    # Status: upsert or delete user_entry_status
+    default = _compute_default_status(position)
+    if status == default:
+        # Return to default: remove override
+        conn.execute(
+            """DELETE FROM user_entry_status
+               WHERE user_id = ?
+                   AND series_entry_id = ?""",
+            (user_id, entry_id),
+        )
+    else:
+        # Set override
+        conn.execute(
+            """INSERT INTO user_entry_status
+                   (user_id, series_entry_id, status)
+               VALUES (?, ?, ?)
+               ON CONFLICT(user_id, series_entry_id)
+               DO UPDATE SET status = ?""",
+            (user_id, entry_id, status, status),
+        )
+
+    conn.commit()
+    conn.close()

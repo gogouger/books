@@ -27,8 +27,18 @@ export async function apiFetch(
         if (!refreshed) {
             clearAuth();
             window.location.href = '/';
+            throw new Error('Not authenticated');
         }
-        throw new Error('Not authenticated');
+        // Retry with new token
+        const newToken = getToken();
+        if (newToken) {
+            headers['Authorization'] = `Bearer ${newToken}`;
+        }
+        const retry = await fetch(`${API_BASE}${path}`, { ...options, headers });
+        if (!retry.ok) {
+            throw new Error('Request failed after re-authentication');
+        }
+        return retry.json();
     }
 
     if (resp.status === 403) {
@@ -65,8 +75,18 @@ async function apiFetchRaw(
         if (!refreshed) {
             clearAuth();
             window.location.href = '/';
+            throw new Error('Not authenticated');
         }
-        throw new Error('Not authenticated');
+        // Retry with new token
+        const newToken = getToken();
+        if (newToken) {
+            headers['Authorization'] = `Bearer ${newToken}`;
+        }
+        const retry = await fetch(`${API_BASE}${path}`, { ...options, headers });
+        if (!retry.ok) {
+            throw new Error('Request failed after re-authentication');
+        }
+        return retry;
     }
 
     if (!resp.ok) {
@@ -109,10 +129,6 @@ export const api = {
         });
     },
 
-    async deleteBook(username: string, id: number): Promise<any> {
-        return apiFetch(`/${username}/books/${id}`, { method: 'DELETE' });
-    },
-
     async sendToKindle(username: string, bookId: number, email?: string): Promise<any> {
         return apiFetch(`/${username}/books/${bookId}/kindle`, {
             method: 'POST',
@@ -120,12 +136,114 @@ export const api = {
         });
     },
 
-    async getSeries(username: string): Promise<any> {
-        return apiFetch(`/${username}/series`);
+    async getSeries(username: string, includeUnmonitored: boolean = false): Promise<any> {
+        const qs = includeUnmonitored ? '?include_unmonitored=true' : '';
+        return apiFetch(`/${username}/series${qs}`);
     },
 
-    async getSeriesBooks(username: string, name: string): Promise<any> {
-        return apiFetch(`/${username}/series/${encodeURIComponent(name)}`);
+    async getSeriesAutocomplete(username: string): Promise<any> {
+        return apiFetch(`/${username}/series/autocomplete`);
+    },
+
+    async getSeriesBooks(username: string, id: number): Promise<any> {
+        return apiFetch(`/${username}/series/${id}`);
+    },
+
+    async getSeriesEdit(username: string, id: number): Promise<any> {
+        return apiFetch(`/${username}/series/${id}/edit`);
+    },
+
+    async updateSeries(username: string, id: number, data: Record<string, any>): Promise<any> {
+        return apiFetch(`/${username}/series/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify(data),
+        });
+    },
+
+    async refreshSeries(username: string, id: number): Promise<any> {
+        return apiFetch(`/${username}/series/${id}/refresh`, {
+            method: 'POST',
+        });
+    },
+
+    async refreshMetadata(username: string, bookId: number): Promise<any> {
+        return apiFetch(`/${username}/books/${bookId}/refresh-metadata`, {
+            method: 'POST',
+        });
+    },
+
+    async setCoverFromUrl(username: string, bookId: number, url: string): Promise<any> {
+        return apiFetch(`/${username}/books/${bookId}/cover-from-url`, {
+            method: 'POST',
+            body: JSON.stringify({ url }),
+        });
+    },
+
+    async previewMetadata(username: string, file: File): Promise<any> {
+        const formData = new FormData();
+        formData.append('file', file);
+        const token = getToken();
+        const headers: Record<string, string> = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const resp = await fetch(`${API_BASE}/${username}/metadata/preview`, {
+            method: 'POST',
+            headers,
+            body: formData,
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+            throw new Error(err.detail || 'Preview failed');
+        }
+        return resp.json();
+    },
+
+    async searchAllMetadata(username: string, title: string, authors: string): Promise<any> {
+        return apiFetch(`/${username}/metadata/search-all`, {
+            method: 'POST',
+            body: JSON.stringify({ title, authors }),
+        });
+    },
+
+    async addBookFromPreview(username: string, data: Record<string, any>): Promise<any> {
+        const resp = await apiFetch(`/${username}/books/from-preview`, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+        return resp;
+    },
+
+    async addBookFromPreviewRaw(username: string, data: Record<string, any>): Promise<Response> {
+        const token = getToken();
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+        };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        return fetch(`${API_BASE}/${username}/books/from-preview`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(data),
+        });
+    },
+
+    async copyToTemp(sourceUsername: string, bookId: number): Promise<any> {
+        return apiFetch(`/${sourceUsername}/books/${bookId}/copy-to-temp`, {
+            method: 'POST',
+        });
+    },
+
+    async copySeriesFromLibrary(
+        sourceUsername: string,
+        seriesLinkId: number,
+    ): Promise<any> {
+        return apiFetch(`/${sourceUsername}/series/${seriesLinkId}/copy-to-library`, {
+            method: 'POST',
+        });
+    },
+
+    async deleteBook(username: string, bookId: number): Promise<any> {
+        return apiFetch(`/${username}/books/${bookId}`, {
+            method: 'DELETE',
+        });
     },
 
     async searchMetadata(username: string, query: string, source: string = 'google'): Promise<any> {
@@ -135,7 +253,12 @@ export const api = {
         });
     },
 
-    async uploadBook(username: string, file: File, metadata?: Record<string, any>): Promise<any> {
+    async uploadBook(
+        username: string,
+        file: File,
+        metadata?: Record<string, any>,
+        options?: { merge_with?: number; force?: boolean },
+    ): Promise<any> {
         const formData = new FormData();
         formData.append('file', file);
         const qs = new URLSearchParams();
@@ -146,6 +269,12 @@ export const api = {
                 }
             }
         }
+        if (options?.merge_with !== undefined) {
+            qs.set('merge_with', String(options.merge_with));
+        }
+        if (options?.force) {
+            qs.set('force', 'true');
+        }
         const token = getToken();
         const headers: Record<string, string> = {};
         if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -155,6 +284,9 @@ export const api = {
             headers,
             body: formData,
         });
+        if (resp.status === 409) {
+            return resp.json();
+        }
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({ detail: resp.statusText }));
             throw new Error(err.detail || 'Upload failed');
@@ -162,8 +294,9 @@ export const api = {
         return resp.json();
     },
 
-    coverUrl(userId: number, coverFilename: string): string {
-        return `/covers/${userId}/${coverFilename}`;
+    coverUrl(userId: number, coverFilename: string, coverUpdatedAt?: string | null): string {
+        const url = `/covers/${userId}/${coverFilename}`;
+        return coverUpdatedAt ? `${url}?v=${coverUpdatedAt}` : url;
     },
 
     async downloadFile(username: string, bookId: number, title: string): Promise<void> {

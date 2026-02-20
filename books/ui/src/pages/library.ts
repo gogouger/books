@@ -1,6 +1,6 @@
 import { api } from '../api';
 import { getLibraryUsername } from '../context';
-import { bookGridHtml, attachGridClickHandlers } from '../components/book-grid';
+import { bookGridHtml, attachGridClickHandlers, appendToBookGrid } from '../components/book-grid';
 import {
     filterBarHtml,
     attachFilterHandlers,
@@ -9,126 +9,277 @@ import {
 
 let currentState: FilterState = {
     q: '',
-    is_read: '',
+    filter: '',
     sort: 'title',
     order: 'asc',
 };
-let currentOffset = 0;
 const PAGE_SIZE = 60;
+let pendingAuthorFilter: string | null = null;
+
+// Infinite scroll + cache state
+let allBooks: any[] = [];
+let totalBooks = 0;
+let savedScrollY = 0;
+let isLoading = false;
+let observer: IntersectionObserver | null = null;
+let lastLoadedState: FilterState | null = null;
+let scrollListener: (() => void) | null = null;
+
+export function setAuthorFilter(author: string): void {
+    pendingAuthorFilter = author;
+}
+
+// Patch a single book's fields in the cache (for inline edits)
+export function updateCachedBook(bookId: number, updates: Record<string, any>): void {
+    const book = allBooks.find(b => b.id === bookId);
+    if (book) Object.assign(book, updates);
+}
+
+// Invalidate entire cache (for full form edits that change sort order).
+// Preserves savedScrollY so the library can restore scroll position on re-render.
+export function invalidateLibraryCache(): void {
+    allBooks = [];
+    totalBooks = 0;
+    lastLoadedState = null;
+}
+
+function statesMatch(a: FilterState, b: FilterState): boolean {
+    return a.q === b.q && a.filter === b.filter && a.sort === b.sort && a.order === b.order;
+}
+
+function applyAuthorFilter(author: string): void {
+    currentState.q = author;
+    currentState.sort = 'title';
+
+    const searchInput = document.getElementById('filter-search') as HTMLInputElement;
+    if (searchInput) searchInput.value = author;
+    const sortSelect = document.getElementById('filter-sort') as HTMLSelectElement;
+    if (sortSelect) sortSelect.value = 'title';
+
+    resetAndReload();
+}
+
+function resetAndReload(): void {
+    allBooks = [];
+    totalBooks = 0;
+    savedScrollY = 0;
+    if (observer) { observer.disconnect(); observer = null; }
+
+    const gridContainer = document.getElementById('book-grid-container');
+    if (gridContainer) gridContainer.innerHTML = '';
+
+    loadMoreBooks();
+}
 
 export async function renderLibrary(): Promise<void> {
+    const canRestore = allBooks.length > 0
+        && lastLoadedState !== null
+        && statesMatch(currentState, lastLoadedState)
+        && !pendingAuthorFilter;
+
+    if (pendingAuthorFilter) {
+        currentState.q = pendingAuthorFilter;
+        currentState.sort = 'title';
+        pendingAuthorFilter = null;
+    }
+
     const app = document.getElementById('app')!;
     app.innerHTML =
         filterBarHtml(currentState) +
         '<div id="book-grid-container"></div>' +
-        '<div id="pagination-container" class="d-flex justify-content-center mt-3 mb-4"></div>';
+        '<div id="scroll-sentinel"></div>';
 
     attachFilterHandlers(app, async (state) => {
         currentState = state;
-        currentOffset = 0;
-        await loadBooks();
+        resetAndReload();
     });
 
-    await loadBooks();
+    setupScrollTracking();
+
+    if (canRestore) {
+        // Restore from cache
+        const gridContainer = document.getElementById('book-grid-container')!;
+        const countEl = document.getElementById('book-count');
+        gridContainer.innerHTML = bookGridHtml(allBooks);
+        attachGridClickHandlers(gridContainer, applyAuthorFilter);
+        if (countEl) {
+            countEl.textContent = `${totalBooks} book${totalBooks !== 1 ? 's' : ''}`;
+        }
+        setupInfiniteScroll();
+        requestAnimationFrame(() => window.scrollTo(0, savedScrollY));
+    } else {
+        // Capture scroll target before resetting — invalidateLibraryCache
+        // preserves it so we can restore position after reloading data.
+        const targetScrollY = savedScrollY;
+        allBooks = [];
+        totalBooks = 0;
+        savedScrollY = 0;
+        lastLoadedState = { ...currentState };
+        await loadMoreBooks();
+
+        // After cache invalidation (e.g., book edit), reload enough batches
+        // to fill the page back to the previous scroll position, then restore.
+        if (targetScrollY > 0 && allBooks.length < totalBooks) {
+            while (allBooks.length < totalBooks) {
+                const canScroll = document.documentElement.scrollHeight - window.innerHeight;
+                if (canScroll >= targetScrollY) break;
+                await loadMoreBooks();
+            }
+            requestAnimationFrame(() => window.scrollTo(0, targetScrollY));
+        }
+    }
 }
 
-async function loadBooks(): Promise<void> {
+async function loadMoreBooks(): Promise<void> {
+    if (isLoading) return;
+    const offset = allBooks.length;
+    if (offset > 0 && offset >= totalBooks) return;
+
+    isLoading = true;
+
     const username = getLibraryUsername()!;
     const gridContainer = document.getElementById('book-grid-container')!;
-    const paginationContainer = document.getElementById('pagination-container')!;
+    const sentinel = document.getElementById('scroll-sentinel');
     const countEl = document.getElementById('book-count');
+    const isFirstBatch = offset === 0;
 
-    gridContainer.innerHTML = `
-        <div class="loading-spinner">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
+    if (isFirstBatch) {
+        gridContainer.innerHTML = `
+            <div class="loading-spinner">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
             </div>
-        </div>
-    `;
+        `;
+    } else if (sentinel) {
+        sentinel.innerHTML = `
+            <div class="loading-spinner">
+                <div class="spinner-border spinner-border-sm text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+        `;
+    }
 
     try {
         const params: Record<string, any> = {
             sort: currentState.sort,
             order: currentState.order,
             limit: PAGE_SIZE,
-            offset: currentOffset,
+            offset: offset,
         };
         if (currentState.q) params.q = currentState.q;
-        if (currentState.is_read !== '') params.is_read = currentState.is_read;
+
+        // Map filter dropdown to API params
+        const f = currentState.filter;
+        if (f === 'read' || f === 'unread' || f === 'reading') {
+            params.reading_status = f;
+        } else if (f === 'owned') {
+            params.is_owned = true;
+        } else if (f === 'unowned') {
+            params.is_owned = false;
+        } else if (f === 'favorites') {
+            params.is_favorite = true;
+        } else if (f === 'unrated') {
+            params.rated = false;
+        } else if (f.endsWith('star')) {
+            const stars = parseInt(f);
+            params.min_rating = stars;
+            params.max_rating = stars;
+        }
+
+        // Auto-filter based on sort field
+        let emptyResult = false;
+        if (currentState.sort === 'series') {
+            params.has_series = true;
+        } else if (currentState.sort === 'rating') {
+            if (params.rated === false) {
+                emptyResult = true;
+            } else {
+                params.rated = true;
+            }
+        } else if (currentState.sort === 'date_finished') {
+            if (params.reading_status && params.reading_status !== 'read') {
+                emptyResult = true;
+            } else {
+                params.reading_status = 'read';
+            }
+        }
+
+        if (emptyResult) {
+            if (isFirstBatch) {
+                gridContainer.innerHTML = bookGridHtml([]);
+            }
+            totalBooks = 0;
+            if (countEl) countEl.textContent = '0 books';
+            if (sentinel) sentinel.innerHTML = '';
+            isLoading = false;
+            lastLoadedState = { ...currentState };
+            return;
+        }
 
         const data = await api.getBooks(username, params);
-        gridContainer.innerHTML = bookGridHtml(data.books);
-        attachGridClickHandlers(gridContainer);
+        totalBooks = data.total;
+
+        if (isFirstBatch) {
+            allBooks = data.books;
+            gridContainer.innerHTML = bookGridHtml(data.books);
+            attachGridClickHandlers(gridContainer, applyAuthorFilter);
+        } else {
+            allBooks = allBooks.concat(data.books);
+            appendToBookGrid(gridContainer, data.books, applyAuthorFilter);
+        }
 
         if (countEl) {
-            countEl.textContent = `${data.total} book${data.total !== 1 ? 's' : ''}`;
+            countEl.textContent = `${totalBooks} book${totalBooks !== 1 ? 's' : ''}`;
         }
+        if (sentinel) sentinel.innerHTML = '';
 
-        // Pagination
-        const totalPages = Math.ceil(data.total / PAGE_SIZE);
-        const currentPage = Math.floor(currentOffset / PAGE_SIZE) + 1;
-
-        if (totalPages > 1) {
-            paginationContainer.innerHTML = paginationHtml(currentPage, totalPages);
-            attachPaginationHandlers(paginationContainer, totalPages);
-        } else {
-            paginationContainer.innerHTML = '';
-        }
+        lastLoadedState = { ...currentState };
+        setupInfiniteScroll();
     } catch (err: any) {
-        gridContainer.innerHTML = `
-            <div class="alert alert-danger">
-                Failed to load books: ${err.message}
-            </div>
-        `;
+        if (isFirstBatch) {
+            gridContainer.innerHTML = `
+                <div class="alert alert-danger">
+                    Failed to load books: ${err.message}
+                </div>
+            `;
+        }
+        if (sentinel) sentinel.innerHTML = '';
+    } finally {
+        isLoading = false;
     }
 }
 
-function paginationHtml(current: number, total: number): string {
-    let html = '<nav><ul class="pagination pagination-sm">';
+function setupInfiniteScroll(): void {
+    if (observer) { observer.disconnect(); observer = null; }
 
-    html += `<li class="page-item${current === 1 ? ' disabled' : ''}">
-        <a class="page-link" href="#" data-page="${current - 1}">Prev</a></li>`;
+    if (allBooks.length >= totalBooks) return;
 
-    const start = Math.max(1, current - 2);
-    const end = Math.min(total, current + 2);
+    const sentinel = document.getElementById('scroll-sentinel');
+    if (!sentinel) return;
 
-    if (start > 1) {
-        html += `<li class="page-item"><a class="page-link" href="#" data-page="1">1</a></li>`;
-        if (start > 2) html += '<li class="page-item disabled"><span class="page-link">...</span></li>';
-    }
-
-    for (let i = start; i <= end; i++) {
-        html += `<li class="page-item${i === current ? ' active' : ''}">
-            <a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
-    }
-
-    if (end < total) {
-        if (end < total - 1) html += '<li class="page-item disabled"><span class="page-link">...</span></li>';
-        html += `<li class="page-item"><a class="page-link" href="#" data-page="${total}">${total}</a></li>`;
-    }
-
-    html += `<li class="page-item${current === total ? ' disabled' : ''}">
-        <a class="page-link" href="#" data-page="${current + 1}">Next</a></li>`;
-
-    html += '</ul></nav>';
-    return html;
-}
-
-function attachPaginationHandlers(
-    container: HTMLElement,
-    totalPages: number
-): void {
-    container.querySelectorAll('.page-link[data-page]').forEach(link => {
-        link.addEventListener('click', (e) => {
-            e.preventDefault();
-            const page = parseInt(
-                (e.target as HTMLElement).dataset.page || '1'
-            );
-            if (page >= 1 && page <= totalPages) {
-                currentOffset = (page - 1) * PAGE_SIZE;
-                loadBooks();
-                window.scrollTo(0, 0);
+    observer = new IntersectionObserver(
+        (entries) => {
+            if (entries[0].isIntersecting) {
+                loadMoreBooks();
             }
-        });
-    });
+        },
+        { rootMargin: '400px' }
+    );
+    observer.observe(sentinel);
+}
+
+function setupScrollTracking(): void {
+    if (scrollListener) {
+        window.removeEventListener('scroll', scrollListener);
+    }
+    scrollListener = () => {
+        // Only track while library is displayed; navigating away replaces
+        // #app content and scrolls to 0, which would clobber savedScrollY.
+        if (document.getElementById('book-grid-container')) {
+            savedScrollY = window.scrollY;
+        }
+    };
+    window.addEventListener('scroll', scrollListener, { passive: true });
 }

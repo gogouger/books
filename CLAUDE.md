@@ -49,8 +49,8 @@ cd books/ui && npx esbuild src/main.ts --bundle --outfile=dist/app.js --watch --
 
 ### Data Storage
 
-- All data under `$BOOKS_DATA_DIR` (from `.env`):
-  - `books.db` - SQLite database
+- All data under `$BOOKS_DATA_DIR` (from `.env`, currently `/data/containers/books/data`):
+  - `books.db` - SQLite database (full path: `/data/containers/books/data/books.db`)
   - `users.json` - email-to-username mapping for Google OAuth
   - `covers/{user_id}/{book_id}.jpg` - cover images (served by nginx)
   - `files/{user_id}/{book_id}.epub` - ebook files (served by FastAPI with auth)

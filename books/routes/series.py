@@ -1,9 +1,18 @@
 import logging
+import shutil
+from datetime import datetime, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
-from ..helpers import db
-from ..helpers.auth import library_owner, optional_user
+from ..helpers import db, hardcover
+from ..helpers.auth import (
+    library_owner,
+    optional_user,
+    require_owner,
+    require_user,
+)
+from ..helpers.db import DATA_DIR
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/series", tags=["series"])
@@ -13,26 +22,388 @@ router = APIRouter(prefix="/series", tags=["series"])
 def list_series(
     owner: library_owner,
     viewer: optional_user,
+    include_unmonitored: bool = False,
 ) -> dict:
-    series = db.get_series_list(owner["id"])
+    monitored = None if include_unmonitored else True
+    series = db.get_series_list(
+        owner["id"], monitored=monitored
+    )
     is_owner = (
-        viewer is not None and viewer["user_id"] == owner["id"]
+        viewer is not None
+        and (viewer["user_id"] == owner["id"] or viewer.get("is_superuser"))
     )
     return {"series": series, "is_owner": is_owner}
 
 
-@router.get("/{series_name}")
+@router.get("/autocomplete")
+def series_autocomplete(
+    owner: library_owner,
+    _viewer: optional_user,
+) -> dict:
+    return {
+        "series": db.get_series_autocomplete(owner["id"])
+    }
+
+
+@router.get("/{series_link_id}")
 def get_series(
-    series_name: str,
+    series_link_id: int,
     owner: library_owner,
     viewer: optional_user,
 ) -> dict:
-    books = db.get_series_books(owner["id"], series_name)
+    link = db.get_series_link_by_id(series_link_id)
+    if not link:
+        raise HTTPException(
+            status_code=404, detail="Series not found"
+        )
+    us = db.get_user_series(owner["id"], series_link_id)
+    if not us:
+        raise HTTPException(
+            status_code=404, detail="Series not found"
+        )
+    books = db.get_series_books(owner["id"], series_link_id)
     is_owner = (
-        viewer is not None and viewer["user_id"] == owner["id"]
+        viewer is not None
+        and (viewer["user_id"] == owner["id"] or viewer.get("is_superuser"))
     )
+    series_name = (
+        us.get("display_name") or link["series_name"]
+    )
+    hardcover_slug = link.get("hardcover_slug")
     return {
+        "series_link_id": series_link_id,
         "series": series_name,
+        "monitored": bool(us.get("monitored", 1)),
+        "hardcover_url": (
+            f"https://hardcover.app/series/{hardcover_slug}"
+            if hardcover_slug else None
+        ),
         "books": books,
         "is_owner": is_owner,
     }
+
+
+@router.get("/{series_link_id}/edit")
+def get_series_edit(
+    series_link_id: int,
+    owner: library_owner,
+    viewer: optional_user,
+) -> dict:
+    link = db.get_series_link_by_id(series_link_id)
+    if not link:
+        raise HTTPException(
+            status_code=404, detail="Series not found"
+        )
+    us = db.get_user_series(owner["id"], series_link_id)
+    if not us:
+        raise HTTPException(
+            status_code=404, detail="Series not found"
+        )
+    is_owner = (
+        viewer is not None
+        and (viewer["user_id"] == owner["id"] or viewer.get("is_superuser"))
+    )
+    series_name = (
+        us.get("display_name") or link["series_name"]
+    )
+    entries = db.get_series_entries_with_books(
+        series_link_id, owner["id"]
+    )
+    return {
+        "series_link_id": series_link_id,
+        "series_name": series_name,
+        "hardcover_series_id": link.get(
+            "hardcover_series_id"
+        ),
+        "hardcover_series_name": link.get(
+            "hardcover_series_name"
+        ),
+        "entries": entries,
+        "is_owner": is_owner,
+    }
+
+
+class EntryUpdate(BaseModel):
+    entry_id: int
+    position: float
+    status: str
+
+
+class BookIgnore(BaseModel):
+    book_id: int
+    ignored: bool
+
+
+class SeriesUpdate(BaseModel):
+    series_name: str | None = None
+    monitored: bool | None = None
+    entries: list[EntryUpdate] | None = None
+    book_ignores: list[BookIgnore] | None = None
+
+
+@router.patch("/{series_link_id}")
+def update_series(
+    series_link_id: int,
+    updates: SeriesUpdate,
+    payload: require_owner,
+) -> dict:
+    user_id = payload["user_id"]
+    us = db.get_user_series(user_id, series_link_id)
+    if not us:
+        raise HTTPException(
+            status_code=404, detail="Series not found"
+        )
+
+    if updates.series_name is not None:
+        db.update_series_display_name(
+            user_id, series_link_id, updates.series_name
+        )
+
+    if updates.monitored is not None:
+        db.update_series_monitored(
+            user_id, series_link_id, updates.monitored
+        )
+
+    if updates.entries:
+        for entry in updates.entries:
+            if entry.status not in ("linked", "ignored"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid status: {entry.status}",
+                )
+            db.update_series_entry(
+                user_id, entry.entry_id,
+                entry.position, entry.status,
+            )
+
+    if updates.book_ignores:
+        for bi in updates.book_ignores:
+            db.update_book(
+                bi.book_id, user_id,
+                {"series_ignored": 1 if bi.ignored else 0},
+            )
+
+    return {"success": True}
+
+
+@router.post("/{series_link_id}/refresh")
+async def refresh_series(
+    series_link_id: int,
+    payload: require_owner,
+) -> dict:
+    user_id = payload["user_id"]
+    us = db.get_user_series(user_id, series_link_id)
+    if not us:
+        raise HTTPException(
+            status_code=404, detail="Series not found"
+        )
+
+    link = db.get_series_link_by_id(series_link_id)
+    if not link:
+        raise HTTPException(
+            status_code=404, detail="Series not found"
+        )
+
+    hc_series_id = link.get("hardcover_series_id")
+    if not hc_series_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Series not linked to Hardcover",
+        )
+
+    raw_books = await hardcover.fetch_series_books(
+        hc_series_id
+    )
+    if not raw_books:
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to fetch Hardcover data",
+        )
+
+    data_hash = hardcover.compute_data_hash(raw_books)
+    if data_hash == link.get("data_hash"):
+        return {"changed": False}
+
+    series_name = (
+        us.get("display_name") or link["series_name"]
+    )
+
+    # Store raw HC data
+    db.store_hc_series_books(series_link_id, raw_books)
+
+    # Match HC entries against user's library books
+    deduped = hardcover.dedup_series_books(raw_books)
+    library_books = db.get_series_books(
+        user_id, series_link_id
+    )
+    entries = hardcover.match_books(deduped, library_books)
+
+    # Sync matched books' positions
+    db.sync_book_positions(user_id, entries)
+
+    # Global entry upsert (preserves IDs)
+    db.upsert_series_entries(series_link_id, entries)
+
+    # Per-user: create placeholder books for linked entries
+    db.ensure_user_books_for_series(
+        user_id, series_link_id, series_name
+    )
+
+    db.link_series(
+        series_link_id,
+        hc_series_id,
+        link.get("hardcover_series_name") or "",
+        data_hash=data_hash,
+    )
+
+    # Return fresh edit data
+    fresh_entries = db.get_series_entries_with_books(
+        series_link_id, user_id
+    )
+    return {
+        "changed": True,
+        "series_link_id": series_link_id,
+        "series_name": series_name,
+        "hardcover_series_id": hc_series_id,
+        "hardcover_series_name": link.get(
+            "hardcover_series_name"
+        ),
+        "entries": fresh_entries,
+        "is_owner": True,
+    }
+
+
+@router.post("/{series_link_id}/copy-to-library")
+def copy_series_to_library(
+    series_link_id: int,
+    owner: library_owner,
+    viewer: require_user,
+) -> dict:
+    """Bulk-copy a series from another user's library."""
+    link = db.get_series_link_by_id(series_link_id)
+    if not link:
+        raise HTTPException(
+            status_code=404, detail="Series not found"
+        )
+
+    source_id = owner["id"]
+    target_id = viewer["user_id"]
+
+    if source_id == target_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot copy from your own library",
+        )
+
+    # Get source books for this series
+    source_books = db.get_series_books(
+        source_id, series_link_id
+    )
+    if not source_books:
+        raise HTTPException(
+            status_code=404,
+            detail="No books in this series",
+        )
+
+    # Ensure target has user_series subscription
+    db.ensure_user_series(target_id, series_link_id)
+
+    # Get target's existing books to check for dupes
+    target_books = db.get_series_books(
+        target_id, series_link_id
+    )
+    target_positions = {
+        b["series_index"]
+        for b in target_books
+        if b.get("series_index") is not None
+    }
+
+    series_name = link["series_name"]
+    now = datetime.now(timezone.utc).isoformat()
+    copied = 0
+    skipped = 0
+
+    for book in source_books:
+        # Skip if target already has a book at this pos
+        if book.get("series_index") in target_positions:
+            skipped += 1
+            continue
+
+        # Insert book record for target user
+        new_book_id = db.insert_book(
+            user_id=target_id,
+            title=book["title"],
+            sort_title=db.make_sort_title(book["title"]),
+            authors=book["authors"],
+            author_sort=db.make_author_sort(
+                book["authors"]
+            ),
+            series=book.get("series") or series_name,
+            series_index=book.get("series_index"),
+            description=book.get("description"),
+            cover_filename=None,
+            file_path=None,
+            isbn=book.get("isbn"),
+            goodreads_id=book.get("goodreads_id"),
+            tags=book.get("tags"),
+            date_added=now,
+            date_finished=None,
+            rating=None,
+            reading_status="unread",
+            series_link_id=series_link_id,
+            published_date=book.get("published_date"),
+            is_owned=1 if book.get("is_owned") else 0,
+        )
+
+        # Copy epub if source has one
+        if book.get("file_path"):
+            src = (
+                DATA_DIR / "files" / str(source_id)
+                / book["file_path"]
+            )
+            if src.exists():
+                dst_dir = (
+                    DATA_DIR / "files" / str(target_id)
+                )
+                dst_dir.mkdir(parents=True, exist_ok=True)
+                dst = dst_dir / f"{new_book_id}.epub"
+                shutil.copy2(str(src), str(dst))
+                db.update_book(
+                    new_book_id, target_id,
+                    {"file_path": f"{new_book_id}.epub"},
+                )
+
+        # Copy cover if source has one
+        if book.get("cover_filename"):
+            src = (
+                DATA_DIR / "covers" / str(source_id)
+                / book["cover_filename"]
+            )
+            if src.exists():
+                dst_dir = (
+                    DATA_DIR / "covers" / str(target_id)
+                )
+                dst_dir.mkdir(parents=True, exist_ok=True)
+                dst = dst_dir / f"{new_book_id}.jpg"
+                shutil.copy2(str(src), str(dst))
+                cover_ts = datetime.now(
+                    timezone.utc
+                ).isoformat()
+                db.update_book(
+                    new_book_id, target_id,
+                    {
+                        "cover_filename": (
+                            f"{new_book_id}.jpg"
+                        ),
+                        "cover_updated_at": cover_ts,
+                    },
+                )
+
+        copied += 1
+
+    # Create unowned placeholders for remaining entries
+    db.ensure_user_books_for_series(
+        target_id, series_link_id, series_name
+    )
+
+    return {"copied": copied, "skipped": skipped}

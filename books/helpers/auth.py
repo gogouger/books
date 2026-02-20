@@ -1,5 +1,6 @@
-"""Google OAuth token validation and user identity resolution."""
+"""Google OAuth and HTTP Basic Auth user identity resolution."""
 
+import base64
 import json
 import logging
 from typing import Annotated
@@ -9,26 +10,35 @@ from fastapi import Depends, HTTPException, Path, Request, status
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2 import id_token
 
-from .db import DATA_DIR, get_user_by_username
+from .db import (
+    DATA_DIR,
+    get_user_by_username,
+    verify_password,
+)
 
 log = logging.getLogger(__name__)
 
-SECURE = config("BOOKS_SECURE", default="false").lower() == "true"
 GOOGLE_CLIENT_ID = config("BOOKS_GOOGLE_CLIENT_ID", default="")
 
 _users_path = DATA_DIR / "users.json"
-_users_cache: dict[str, str] | None = None
+_users_cache: dict[str, str] = {}
+_users_mtime: float = 0.0
 
 
 def _load_users() -> dict[str, str]:
-    """Load email-to-username mapping from users.json."""
-    global _users_cache
-    if _users_cache is None:
-        if _users_path.exists():
-            _users_cache = json.loads(_users_path.read_text())
-        else:
-            log.warning("users.json not found at %s", _users_path)
-            _users_cache = {}
+    """Load email-to-username mapping from users.json.
+
+    Re-reads the file when its mtime changes.
+    """
+    global _users_cache, _users_mtime
+    if not _users_path.exists():
+        log.warning("users.json not found at %s", _users_path)
+        return {}
+    mtime = _users_path.stat().st_mtime
+    if mtime != _users_mtime:
+        _users_cache = json.loads(_users_path.read_text())
+        _users_mtime = mtime
+        log.info("Loaded %d users from %s", len(_users_cache), _users_path)
     return _users_cache
 
 
@@ -42,9 +52,6 @@ def _get_user(request: Request) -> dict:
         HTTPException: 401 if token missing/invalid,
             403 if email not registered.
     """
-    if not SECURE:
-        return {"user_id": 1, "username": "andy"}
-
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(
@@ -80,7 +87,11 @@ def _get_user(request: Request) -> dict:
             status.HTTP_403_FORBIDDEN, "Not authorized"
         )
 
-    return {"user_id": user["id"], "username": user["username"]}
+    return {
+        "user_id": user["id"],
+        "username": user["username"],
+        "is_superuser": bool(user.get("is_superuser")),
+    }
 
 
 def _optional_user(request: Request) -> dict | None:
@@ -111,6 +122,7 @@ def _resolve_library_owner(
         "id": user["id"],
         "username": user["username"],
         "display_name": user["display_name"],
+        "kindle_email": user.get("kindle_email"),
     }
 
 
@@ -128,15 +140,66 @@ def _require_owner(
     """
     user = _get_user(request)
     owner = _resolve_library_owner(username)
-    if user["user_id"] != owner["id"]:
+    if user["user_id"] != owner["id"] and not user["is_superuser"]:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             "Not your library",
         )
-    return user
+    # When superuser acts on another library, use the owner's ID
+    return {"user_id": owner["id"], "username": owner["username"]}
+
+
+def _basic_auth_user(request: Request) -> dict:
+    """Validate HTTP Basic Auth credentials and return user dict.
+
+    Returns:
+        Dict with user_id and username keys.
+
+    Raises:
+        HTTPException: 401 if credentials missing or invalid.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Basic "):
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "Authentication required",
+            headers={"WWW-Authenticate": "Basic realm=\"books\""},
+        )
+
+    try:
+        decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+        username, password = decoded.split(":", 1)
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "Invalid credentials",
+            headers={"WWW-Authenticate": "Basic realm=\"books\""},
+        )
+
+    user = get_user_by_username(username)
+    if user is None or not user.get("password_hash"):
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "Invalid credentials",
+            headers={"WWW-Authenticate": "Basic realm=\"books\""},
+        )
+
+    if not verify_password(password, user["password_hash"]):
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "Invalid credentials",
+            headers={"WWW-Authenticate": "Basic realm=\"books\""},
+        )
+
+    return {
+        "user_id": user["id"],
+        "username": user["username"],
+        "is_superuser": bool(user.get("is_superuser")),
+    }
 
 
 require_user = Annotated[dict, Depends(_get_user)]
 optional_user = Annotated[dict | None, Depends(_optional_user)]
+basic_auth_user = Annotated[dict, Depends(_basic_auth_user)]
 library_owner = Annotated[dict, Depends(_resolve_library_owner)]
 require_owner = Annotated[dict, Depends(_require_owner)]

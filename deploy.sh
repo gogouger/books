@@ -12,6 +12,7 @@ echo "=== Syncing UI dist ==="
 mkdir -p "$DEST/client"
 rsync -a "$PROJ/books/ui/index.html" "$DEST/client/"
 rsync -a "$PROJ/books/ui/style.css" "$DEST/client/"
+rsync -a "$PROJ/books/ui/favicon.svg" "$DEST/client/"
 rsync -a --delete "$PROJ/books/ui/dist/" "$DEST/client/dist/"
 
 echo "=== Syncing API source ==="

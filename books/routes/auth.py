@@ -1,3 +1,4 @@
+import json
 import logging
 
 from fastapi import APIRouter, HTTPException
@@ -15,6 +16,8 @@ class UserResponse(BaseModel):
     username: str
     display_name: str
     kindle_email: str | None
+    is_superuser: bool
+    libraries: list[dict] = []
 
 
 class KindleEmailUpdate(BaseModel):
@@ -30,11 +33,20 @@ def get_me(
         raise HTTPException(
             status_code=404, detail="User not found"
         )
+    libraries = []
+    if user.get("libraries"):
+        try:
+            libraries = json.loads(user["libraries"])
+        except (json.JSONDecodeError, TypeError):
+            libraries = []
+
     return UserResponse(
         id=user["id"],
         username=user["username"],
         display_name=user["display_name"],
         kindle_email=user["kindle_email"],
+        is_superuser=bool(user.get("is_superuser")),
+        libraries=libraries,
     )
 
 
