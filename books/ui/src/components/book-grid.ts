@@ -25,13 +25,13 @@ export function attachGridClickHandlers(
         });
 
         if (onAuthorClick) {
-            const authorEl = card.querySelector('.card-author-link');
-            if (authorEl) {
+            card.querySelectorAll('.card-author-link').forEach(authorEl => {
                 authorEl.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    onAuthorClick(authorEl.textContent?.trim() || '');
+                    const author = (authorEl as HTMLElement).dataset.author || '';
+                    if (author) onAuthorClick(author);
                 });
-            }
+            });
         }
 
         const seriesLink = card.querySelector('.card-series-link');
@@ -64,13 +64,13 @@ export function appendToBookGrid(
         });
 
         if (onAuthorClick) {
-            const authorEl = card.querySelector('.card-author-link');
-            if (authorEl) {
+            card.querySelectorAll('.card-author-link').forEach(authorEl => {
                 authorEl.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    onAuthorClick(authorEl.textContent?.trim() || '');
+                    const author = (authorEl as HTMLElement).dataset.author || '';
+                    if (author) onAuthorClick(author);
                 });
-            }
+            });
         }
 
         const seriesLink = card.querySelector('.card-series-link');

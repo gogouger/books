@@ -243,7 +243,7 @@ function renderEntryRow(entry: SeriesEntry): string {
             <div class="d-flex align-items-center gap-2">
                 ${coverImg}
                 <div class="min-width-0">
-                    <div class="small fw-semibold text-truncate">${escapeHtml(entry.book_title || '')}</div>
+                    <div class="small fw-semibold">${escapeHtml(entry.book_title || '')}</div>
                     <div class="small text-muted text-truncate">${escapeHtml(entry.book_authors || '')}</div>
                     <div>${badge}</div>
                 </div>

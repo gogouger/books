@@ -3,9 +3,9 @@ import { getLibraryUsername } from './context';
 import { addRoute, setDefaultRoute, startRouter } from './router';
 import { initThemeToggle } from './theme';
 import { renderLogin, updateNavbar } from './pages/login';
-import { renderLibrary } from './pages/library';
+import { renderLibrary, resetLibraryFilters } from './pages/library';
 import { renderBookDetail } from './pages/book-detail';
-import { renderSeriesList } from './pages/series-list';
+import { renderSeriesList, resetSeriesFilters } from './pages/series-list';
 import { renderSeriesView } from './pages/series-view';
 import { renderSeriesEdit } from './pages/series-edit';
 import { renderAddBook } from './pages/add-book';
@@ -33,4 +33,12 @@ if (!username) {
     bootstrapAuth();
     updateNavbar();
     startRouter();
+
+    // Reset filters when clicking nav links directly
+    document.getElementById('nav-library')?.addEventListener('click', () => {
+        resetLibraryFilters();
+    });
+    document.getElementById('nav-series')?.addEventListener('click', () => {
+        resetSeriesFilters();
+    });
 }

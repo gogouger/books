@@ -49,19 +49,19 @@ function scheduleTokenRefresh(token: string): void {
 }
 
 export function getToken(): string | null {
-    return sessionStorage.getItem(TOKEN_KEY);
+    return localStorage.getItem(TOKEN_KEY);
 }
 
 export function setToken(token: string): void {
-    sessionStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(TOKEN_KEY, token);
     storeEmailHint(token);
     scheduleTokenRefresh(token);
 }
 
 export function clearAuth(): void {
     if (tokenRefreshTimeout) clearTimeout(tokenRefreshTimeout);
-    sessionStorage.removeItem(TOKEN_KEY);
-    sessionStorage.removeItem('books_user');
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem('books_user');
     localStorage.removeItem(EMAIL_HINT_KEY);
     if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
         google.accounts.id.disableAutoSelect();
@@ -69,13 +69,13 @@ export function clearAuth(): void {
 }
 
 export function getUser(): any | null {
-    const raw = sessionStorage.getItem('books_user');
+    const raw = localStorage.getItem('books_user');
     if (!raw) return null;
     try { return JSON.parse(raw); } catch { return null; }
 }
 
 export function setUser(user: any): void {
-    sessionStorage.setItem('books_user', JSON.stringify(user));
+    localStorage.setItem('books_user', JSON.stringify(user));
 }
 
 async function waitForGoogleApi(): Promise<void> {

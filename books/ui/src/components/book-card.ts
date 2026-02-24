@@ -49,12 +49,19 @@ export function bookCardHtml(book: any): string {
                 </div>
                 <div class="card-body">
                     <div class="card-title">${escapeHtml(book.title)}</div>
-                    <div class="card-author card-author-link">${escapeHtml(book.authors)}</div>
+                    <div class="card-author">${authorsHtml(book.authors)}</div>
                     ${seriesInfo}
                 </div>
             </div>
         </div>
     `;
+}
+
+function authorsHtml(authors: string): string {
+    return authors.split(',').map(a => {
+        const trimmed = a.trim();
+        return `<span class="card-author-link" data-author="${escapeHtml(trimmed)}">${escapeHtml(trimmed)}</span>`;
+    }).join(', ');
 }
 
 function escapeHtml(text: string): string {

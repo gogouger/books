@@ -141,6 +141,17 @@ body {
     color: var(--bs-link-color);
 }
 
+.series-author-link,
+.series-book-author-link {
+    cursor: pointer;
+}
+
+.series-author-link:hover,
+.series-book-author-link:hover {
+    text-decoration: underline;
+    color: var(--bs-link-color);
+}
+
 .card-series-link {
     color: inherit;
     text-decoration: none;
@@ -240,6 +251,28 @@ body {
 .filter-bar .form-control,
 .filter-bar .form-select {
     font-size: 0.9rem;
+}
+
+#filter-search {
+    padding-right: 2rem;
+}
+
+.btn-search-clear {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    padding: 0 4px;
+    color: var(--bs-secondary-color);
+    cursor: pointer;
+    line-height: 1;
+    font-size: 0.85rem;
+}
+
+.btn-search-clear:hover {
+    color: var(--bs-body-color);
 }
 
 /* Book detail */

@@ -1,6 +1,7 @@
 import { api } from '../api';
 import { getLibraryUsername } from '../context';
-import { navigate } from '../router';
+import { navigate, navigateHome } from '../router';
+import { setAuthorFilter } from './library';
 import {
     filterBarHtml,
     attachFilterHandlers,
@@ -19,6 +20,7 @@ let currentState: FilterState = {
     filter: '',
     sort: 'title',
     order: 'asc',
+    rated: null,  // unused in series view but required by FilterState
 };
 
 const SERIES_FILTER_OPTIONS: FilterOption[] = [
@@ -38,6 +40,12 @@ const SERIES_SORT_OPTIONS: SortOption[] = [
 
 export function invalidateSeriesCache(): void {
     cachedSeries = null;
+}
+
+export function resetSeriesFilters(): void {
+    currentState = { q: '', filter: '', sort: 'title', order: 'asc', rated: null };
+    cachedSeries = null;
+    savedScrollY = 0;
 }
 
 export async function renderSeriesList(): Promise<void> {
@@ -76,7 +84,11 @@ export async function renderSeriesList(): Promise<void> {
 
 function renderPage(app: HTMLElement): void {
     app.innerHTML =
-        filterBarHtml(currentState, SERIES_FILTER_OPTIONS, SERIES_SORT_OPTIONS) +
+        filterBarHtml(currentState, {
+            filterOptions: SERIES_FILTER_OPTIONS,
+            sortOptions: SERIES_SORT_OPTIONS,
+            showRated: false,
+        }) +
         `<div class="mb-3">
             <div class="form-check form-switch">
                 <input class="form-check-input" type="checkbox" id="show-hidden-toggle"
@@ -197,7 +209,10 @@ function renderSeriesGrid(container: HTMLElement, series: any[]): void {
         );
 
         const authorHtml = s.authors
-            ? `<div class="text-muted small">${escapeHtml(s.authors)}</div>`
+            ? `<div class="text-muted small">${s.authors.split(',').map((a: string) => {
+                const trimmed = a.trim();
+                return `<span class="series-author-link" data-authors="${escapeHtml(trimmed)}">${escapeHtml(trimmed)}</span>`;
+            }).join(', ')}</div>`
             : '';
 
         html += `
@@ -228,6 +243,17 @@ function renderSeriesGrid(container: HTMLElement, series: any[]): void {
         card.addEventListener('click', () => {
             const id = card.getAttribute('data-series-id');
             if (id) navigate(`#/series/${id}`);
+        });
+    });
+
+    container.querySelectorAll('.series-author-link').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const author = (el as HTMLElement).dataset.authors;
+            if (author) {
+                setAuthorFilter(author);
+                navigateHome();
+            }
         });
     });
 }

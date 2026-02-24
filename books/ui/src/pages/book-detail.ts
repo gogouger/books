@@ -237,7 +237,7 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
                 </div>
                 <div class="col">
                     <h2>${escapeHtml(book.title)}${notOwnedHtml}</h2>
-                    <h5 class="text-muted"><a href="#" class="author-link">${escapeHtml(book.authors)}</a></h5>
+                    <h5 class="text-muted">${authorsDetailHtml(book.authors)}</h5>
                     ${seriesHtml}
                     ${publishedHtml}
 
@@ -276,14 +276,16 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
         navigateHome();
     });
 
-    const authorLink = app.querySelector('.author-link');
-    if (authorLink) {
-        authorLink.addEventListener('click', (e) => {
+    app.querySelectorAll('.author-link').forEach(link => {
+        link.addEventListener('click', (e) => {
             e.preventDefault();
-            setAuthorFilter(book.authors);
-            navigateHome();
+            const author = (link as HTMLElement).dataset.author || '';
+            if (author) {
+                setAuthorFilter(author);
+                navigateHome();
+            }
         });
-    }
+    });
 
     // Copy to My Library handler (non-owner only)
     const copyBtn = document.getElementById('copy-to-library-btn');
@@ -457,6 +459,13 @@ function showAlert(message: string, type: string): void {
         </div>
     `;
     setTimeout(() => { container.innerHTML = ''; }, 3000);
+}
+
+function authorsDetailHtml(authors: string): string {
+    return authors.split(',').map(a => {
+        const trimmed = a.trim();
+        return `<a href="#" class="author-link" data-author="${escapeAttr(trimmed)}">${escapeHtml(trimmed)}</a>`;
+    }).join(', ');
 }
 
 function formatDate(dateStr: string): string {

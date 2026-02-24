@@ -3,6 +3,7 @@ export interface FilterState {
     filter: string;
     sort: string;
     order: string;
+    rated: boolean | null;
 }
 
 export interface FilterOption { value: string; label: string; hr?: boolean }
@@ -19,7 +20,6 @@ const DEFAULT_FILTER_OPTIONS: FilterOption[] = [
     { value: 'unowned', label: 'Unowned' },
     { value: '_hr3', label: '', hr: true },
     { value: 'favorites', label: 'Favorites' },
-    { value: 'unrated', label: 'Unrated' },
     { value: '1star', label: '1 star' },
     { value: '2star', label: '2 stars' },
     { value: '3star', label: '3 stars' },
@@ -36,13 +36,29 @@ const DEFAULT_SORT_OPTIONS: SortOption[] = [
     { value: 'series', label: 'Series' },
 ];
 
+export interface FilterBarOptions {
+    filterOptions?: FilterOption[];
+    sortOptions?: SortOption[];
+    showRated?: boolean;
+}
+
 export function filterBarHtml(
     state: FilterState,
-    filterOptions?: FilterOption[],
+    filterOptionsOrOpts?: FilterOption[] | FilterBarOptions,
     sortOptions?: SortOption[],
 ): string {
-    const filters = filterOptions || DEFAULT_FILTER_OPTIONS;
-    const sorts = sortOptions || DEFAULT_SORT_OPTIONS;
+    let filters: FilterOption[];
+    let sorts: SortOption[];
+    let showRated = true;
+
+    if (filterOptionsOrOpts && !Array.isArray(filterOptionsOrOpts)) {
+        filters = filterOptionsOrOpts.filterOptions || DEFAULT_FILTER_OPTIONS;
+        sorts = filterOptionsOrOpts.sortOptions || DEFAULT_SORT_OPTIONS;
+        showRated = filterOptionsOrOpts.showRated !== false;
+    } else {
+        filters = filterOptionsOrOpts || DEFAULT_FILTER_OPTIONS;
+        sorts = sortOptions || DEFAULT_SORT_OPTIONS;
+    }
 
     let filterHtml = '';
     for (const opt of filters) {
@@ -61,10 +77,14 @@ export function filterBarHtml(
     return `
         <div class="filter-bar">
             <div class="row g-2 align-items-end">
-                <div class="col-auto">
+                <div class="col-auto position-relative">
                     <input type="text" class="form-control" id="filter-search"
                            placeholder="Search..."
                            value="${escapeAttr(state.q)}">
+                    <button type="button" class="btn-search-clear${state.q ? '' : ' d-none'}" id="filter-search-clear"
+                            title="Clear search">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
                 </div>
                 <div class="col-auto">
                     <select class="form-select" id="filter-main">
@@ -82,6 +102,12 @@ export function filterBarHtml(
                         <i class="bi bi-sort-${state.order === 'asc' ? 'up' : 'down'}"></i>
                     </button>
                 </div>
+                ${showRated ? `<div class="col-auto">
+                    <button type="button" class="btn btn-outline-secondary" id="filter-rated"
+                            data-rated="${state.rated}" title="${state.rated === null ? 'Showing all' : state.rated ? 'Showing rated' : 'Showing unrated'}">
+                        <i class="bi bi-star${state.rated === null ? '-half' : state.rated ? '-fill' : ''}"></i>
+                    </button>
+                </div>` : ''}
                 <div class="col-auto text-end">
                     <span class="pagination-info" id="book-count"></span>
                 </div>
@@ -101,13 +127,30 @@ export function attachFilterHandlers(
         filter: (container.querySelector('#filter-main') as HTMLSelectElement)?.value || '',
         sort: (container.querySelector('#filter-sort') as HTMLSelectElement)?.value || 'title',
         order: (container.querySelector('#filter-order') as HTMLElement)?.dataset.order || 'asc',
+        rated: (() => {
+            const v = (container.querySelector('#filter-rated') as HTMLElement)?.dataset.rated;
+            return v === 'true' ? true : v === 'false' ? false : null;
+        })(),
     });
 
-    const searchInput = container.querySelector('#filter-search');
+    const searchInput = container.querySelector('#filter-search') as HTMLInputElement;
+    const clearBtn = container.querySelector('#filter-search-clear') as HTMLElement;
+
     if (searchInput) {
         searchInput.addEventListener('input', () => {
+            if (clearBtn) {
+                clearBtn.classList.toggle('d-none', !searchInput.value);
+            }
             clearTimeout(debounceTimer);
             debounceTimer = setTimeout(() => onChange(getState()), 300);
+        });
+    }
+
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            if (searchInput) searchInput.value = '';
+            clearBtn.classList.add('d-none');
+            onChange(getState());
         });
     }
 
@@ -125,6 +168,21 @@ export function attachFilterHandlers(
             orderBtn.title = next === 'asc' ? 'Ascending' : 'Descending';
             const icon = orderBtn.querySelector('i')!;
             icon.className = `bi bi-sort-${next === 'asc' ? 'up' : 'down'}`;
+            onChange(getState());
+        });
+    }
+
+    const ratedBtn = container.querySelector('#filter-rated') as HTMLElement;
+    if (ratedBtn) {
+        ratedBtn.addEventListener('click', () => {
+            const cur = ratedBtn.dataset.rated;
+            // Cycle: rated -> unrated -> all -> rated
+            const next = cur === 'true' ? 'false' : cur === 'false' ? 'null' : 'true';
+            ratedBtn.dataset.rated = next;
+            const icon = next === 'null' ? 'star-half' : next === 'true' ? 'star-fill' : 'star';
+            const title = next === 'null' ? 'Showing all' : next === 'true' ? 'Showing rated' : 'Showing unrated';
+            ratedBtn.title = title;
+            ratedBtn.querySelector('i')!.className = `bi bi-${icon}`;
             onChange(getState());
         });
     }

@@ -15,6 +15,11 @@ log = logging.getLogger(__name__)
 DATA_DIR = Path(config("BOOKS_DATA_DIR", default="/app/data"))
 DB_PATH = DATA_DIR / "books.db"
 
+EPUB_METADATA_FIELDS = {
+    "title", "authors", "series", "series_index",
+    "description", "isbn", "tags",
+}
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,6 +136,47 @@ CREATE INDEX IF NOT EXISTS idx_hc_series_books_link
 """
 
 
+def sync_book_epub(book_id: int, user_id: int) -> None:
+    """Sync EPUB file metadata to match DB for a book.
+
+    Loads the book from DB, builds a metadata dict, and
+    calls sync_epub_metadata(). Silently skips books with
+    no file_path or missing files.
+    """
+    try:
+        book = get_book(book_id, user_id)
+        if not book or not book.get("file_path"):
+            return
+        epub_path = (
+            DATA_DIR / "files" / str(user_id)
+            / book["file_path"]
+        )
+        if not epub_path.exists():
+            return
+
+        tags = book.get("tags", [])
+        if isinstance(tags, str):
+            tags = json.loads(tags)
+
+        meta = {
+            "title": book["title"],
+            "authors": book["authors"],
+            "series": book.get("series"),
+            "series_index": book.get("series_index"),
+            "description": book.get("description"),
+            "isbn": book.get("isbn"),
+            "tags": tags,
+        }
+
+        from .metadata import sync_epub_metadata
+        sync_epub_metadata(str(epub_path), meta)
+    except Exception:
+        log.exception(
+            "Failed to sync EPUB for book %d user %d",
+            book_id, user_id,
+        )
+
+
 def make_sort_title(title: str) -> str:
     """Strip leading articles for alphabetical sorting."""
     lower = title.lower()
@@ -186,6 +232,7 @@ def init_db() -> None:
     _migrate_superusers()
     _migrate_archive_user()
     _migrate_series_ignored()
+    _migrate_koreader_sync()
     log.info("Database initialized at %s", DB_PATH)
 
 
@@ -934,6 +981,36 @@ def _migrate_series_ignored() -> None:
     conn.close()
 
 
+def _migrate_koreader_sync() -> None:
+    """Add koreader_filename and sync_updated_at columns."""
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(books)"
+        ).fetchall()
+    ]
+    if "koreader_filename" in columns:
+        conn.close()
+        return
+
+    log.info("Adding KOReader sync columns to books")
+    conn.execute(
+        "ALTER TABLE books ADD COLUMN"
+        " koreader_filename TEXT"
+    )
+    conn.execute(
+        "ALTER TABLE books ADD COLUMN"
+        " sync_updated_at TEXT"
+    )
+    conn.execute(
+        "CREATE INDEX idx_books_koreader_filename"
+        " ON books(user_id, koreader_filename)"
+    )
+    conn.commit()
+    conn.close()
+
+
 def update_user_libraries(
     user_id: int, libraries_json: str
 ) -> None:
@@ -1067,6 +1144,7 @@ def get_books(
     is_owned: bool | None = None,
     has_series: bool | None = None,
     rated: bool | None = None,
+    letter: str | None = None,
     sort: str = "title",
     order: str = "asc",
     limit: int = 50,
@@ -1074,6 +1152,17 @@ def get_books(
 ) -> list[dict]:
     conditions = [
         "user_id = ?", "series_ignored = 0",
+        # Hide unowned+unread books from unmonitored series
+        """NOT (is_owned = 0
+            AND reading_status = 'unread'
+            AND series_link_id IS NOT NULL
+            AND EXISTS (
+                SELECT 1 FROM user_series us
+                WHERE us.user_id = books.user_id
+                    AND us.series_link_id
+                        = books.series_link_id
+                    AND us.monitored = 0
+            ))""",
     ]
     params: list = [user_id]
 
@@ -1119,6 +1208,18 @@ def get_books(
             conditions.append("rating IS NOT NULL")
         else:
             conditions.append("rating IS NULL")
+
+    if letter is not None:
+        if letter == "#":
+            conditions.append(
+                "UPPER(SUBSTR(sort_title, 1, 1))"
+                " NOT BETWEEN 'A' AND 'Z'"
+            )
+        else:
+            conditions.append(
+                "UPPER(SUBSTR(sort_title, 1, 1)) = ?"
+            )
+            params.append(letter.upper())
 
     allowed_sort = {
         "title": "sort_title",
@@ -1157,9 +1258,21 @@ def count_books(
     is_owned: bool | None = None,
     has_series: bool | None = None,
     rated: bool | None = None,
+    letter: str | None = None,
 ) -> int:
     conditions = [
         "user_id = ?", "series_ignored = 0",
+        # Hide unowned+unread books from unmonitored series
+        """NOT (is_owned = 0
+            AND reading_status = 'unread'
+            AND series_link_id IS NOT NULL
+            AND EXISTS (
+                SELECT 1 FROM user_series us
+                WHERE us.user_id = books.user_id
+                    AND us.series_link_id
+                        = books.series_link_id
+                    AND us.monitored = 0
+            ))""",
     ]
     params: list = [user_id]
 
@@ -1206,6 +1319,18 @@ def count_books(
         else:
             conditions.append("rating IS NULL")
 
+    if letter is not None:
+        if letter == "#":
+            conditions.append(
+                "UPPER(SUBSTR(sort_title, 1, 1))"
+                " NOT BETWEEN 'A' AND 'Z'"
+            )
+        else:
+            conditions.append(
+                "UPPER(SUBSTR(sort_title, 1, 1)) = ?"
+            )
+            params.append(letter.upper())
+
     where = " AND ".join(conditions)
     query = f"SELECT COUNT(*) FROM books WHERE {where}"
 
@@ -1213,6 +1338,73 @@ def count_books(
     count = conn.execute(query, params).fetchone()[0]
     conn.close()
     return count
+
+
+def count_books_by_letter(
+    user_id: int,
+    reading_status: str | None = None,
+    min_rating: int | None = None,
+    max_rating: int | None = None,
+    is_favorite: bool | None = None,
+    is_owned: bool | None = None,
+    rated: bool | None = None,
+) -> dict[str, int]:
+    """Count books grouped by first letter of sort_title.
+
+    Returns {"A": 23, "B": 15, ..., "#": 4} where "#"
+    covers non-alpha first characters.
+    """
+    conditions = [
+        "user_id = ?", "series_ignored = 0",
+        """NOT (is_owned = 0
+            AND reading_status = 'unread'
+            AND series_link_id IS NOT NULL
+            AND EXISTS (
+                SELECT 1 FROM user_series us
+                WHERE us.user_id = books.user_id
+                    AND us.series_link_id
+                        = books.series_link_id
+                    AND us.monitored = 0
+            ))""",
+    ]
+    params: list = [user_id]
+
+    if reading_status is not None:
+        conditions.append("reading_status = ?")
+        params.append(reading_status)
+    if min_rating is not None:
+        conditions.append("rating >= ?")
+        params.append(min_rating)
+    if max_rating is not None:
+        conditions.append("rating <= ?")
+        params.append(max_rating)
+    if is_favorite is not None:
+        conditions.append("is_favorite = ?")
+        params.append(1 if is_favorite else 0)
+    if is_owned is not None:
+        conditions.append("is_owned = ?")
+        params.append(1 if is_owned else 0)
+    if rated is not None:
+        if rated:
+            conditions.append("rating IS NOT NULL")
+        else:
+            conditions.append("rating IS NULL")
+
+    where = " AND ".join(conditions)
+    query = f"""
+        SELECT CASE
+            WHEN UPPER(SUBSTR(sort_title, 1, 1))
+                BETWEEN 'A' AND 'Z'
+            THEN UPPER(SUBSTR(sort_title, 1, 1))
+            ELSE '#'
+        END as letter, COUNT(*) as count
+        FROM books WHERE {where}
+        GROUP BY letter ORDER BY letter
+    """
+    conn = get_db()
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    return {r["letter"]: r["count"] for r in rows}
 
 
 def get_book(book_id: int, user_id: int) -> dict | None:
@@ -1412,6 +1604,14 @@ def update_book(
     if not filtered:
         return False
 
+    # When reading state changes via web UI, bump sync
+    # timestamp so KOReader picks up the change
+    sync_fields = {"reading_status", "rating", "progress"}
+    if filtered.keys() & sync_fields:
+        filtered["sync_updated_at"] = (
+            datetime.now(timezone.utc).isoformat()
+        )
+
     sets = ", ".join(f"{k} = ?" for k in filtered)
     values = list(filtered.values())
     values.extend([book_id, user_id])
@@ -1424,6 +1624,10 @@ def update_book(
     conn.commit()
     changed = cursor.rowcount > 0
     conn.close()
+
+    if changed and filtered.keys() & EPUB_METADATA_FIELDS:
+        sync_book_epub(book_id, user_id)
+
     return changed
 
 
@@ -1521,9 +1725,21 @@ def ensure_user_books_for_series(
 
     For each series entry with effective status 'linked' that
     has no matching book for this user, creates an unowned
-    book record.
+    book record. Only creates placeholders if the user
+    subscribes to this series via user_series.
     """
     conn = get_db()
+
+    # Guard: only create placeholders for subscribed series
+    subscribed = conn.execute(
+        """SELECT 1 FROM user_series
+           WHERE user_id = ? AND series_link_id = ?""",
+        (user_id, series_link_id),
+    ).fetchone()
+    if not subscribed:
+        conn.close()
+        return
+
     entries = conn.execute(
         f"""SELECT se.id, se.position, se.title, se.author
            FROM series_entries se
@@ -1537,9 +1753,19 @@ def ensure_user_books_for_series(
                    WHERE b.user_id = ?
                        AND b.series_link_id = ?
                        AND b.series_index = se.position
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM books b
+                   WHERE b.user_id = ?
+                       AND b.is_owned = 1
+                       AND LOWER(TRIM(b.title))
+                           = LOWER(TRIM(se.title))
+                       AND LOWER(TRIM(b.authors))
+                           = LOWER(TRIM(se.author))
                )""",
         (user_id, series_link_id,
-         user_id, series_link_id),
+         user_id, series_link_id,
+         user_id),
     ).fetchall()
 
     for entry in entries:
@@ -1566,6 +1792,7 @@ def sync_book_positions(
     with their Hardcover positions.
     """
     conn = get_db()
+    synced_ids = []
     for entry in entries:
         if entry.get("book_id"):
             conn.execute(
@@ -1574,8 +1801,12 @@ def sync_book_positions(
                 (entry["position"], entry["book_id"],
                  user_id),
             )
+            synced_ids.append(entry["book_id"])
     conn.commit()
     conn.close()
+
+    for bid in synced_ids:
+        sync_book_epub(bid, user_id)
 
 
 def get_series_list(
@@ -1691,6 +1922,121 @@ def get_series_list(
         s["owned_seq"] = "".join(pair[1])
 
     return series_list
+
+
+def get_filtered_series(
+    user_id: int,
+    reading_status: str | None = None,
+    rated: bool | None = None,
+    min_rating: float | None = None,
+    max_rating: float | None = None,
+    is_favorite: bool | None = None,
+) -> list[dict]:
+    """Return series with book counts, respecting filters.
+
+    Returns [{"series": name, "series_link_id": id,
+    "count": N}, ...] ordered by series name.
+    """
+    conditions = [
+        "b.user_id = ?",
+        "b.is_owned = 1",
+        "b.series_link_id IS NOT NULL",
+        "b.series_ignored = 0",
+    ]
+    params: list = [user_id]
+
+    if reading_status is not None:
+        conditions.append("b.reading_status = ?")
+        params.append(reading_status)
+    if rated is not None:
+        if rated:
+            conditions.append("b.rating IS NOT NULL")
+        else:
+            conditions.append("b.rating IS NULL")
+    if min_rating is not None:
+        conditions.append("b.rating >= ?")
+        params.append(min_rating)
+    if max_rating is not None:
+        conditions.append("b.rating <= ?")
+        params.append(max_rating)
+    if is_favorite is not None:
+        conditions.append("b.is_favorite = ?")
+        params.append(1 if is_favorite else 0)
+
+    where = " AND ".join(conditions)
+    conn = get_db()
+    rows = conn.execute(
+        f"""SELECT COALESCE(us.display_name,
+                sl.series_name) as series,
+                b.series_link_id,
+                COUNT(*) as count
+            FROM books b
+            JOIN series_link sl
+                ON b.series_link_id = sl.id
+            LEFT JOIN user_series us
+                ON us.series_link_id = sl.id
+                AND us.user_id = b.user_id
+            WHERE {where}
+            GROUP BY b.series_link_id
+            ORDER BY COALESCE(us.display_name,
+                sl.series_name)""",
+        params,
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_distinct_authors(
+    user_id: int,
+    reading_status: str | None = None,
+    rated: bool | None = None,
+    min_rating: float | None = None,
+    max_rating: float | None = None,
+    is_favorite: bool | None = None,
+) -> list[dict]:
+    """Return distinct authors with book counts.
+
+    Returns [{"authors": name, "count": N}, ...] ordered
+    by count desc. Treats multi-author strings as single
+    entries.
+    """
+    conditions = [
+        "user_id = ?",
+        "is_owned = 1",
+        "series_ignored = 0",
+    ]
+    params: list = [user_id]
+
+    if reading_status is not None:
+        conditions.append("reading_status = ?")
+        params.append(reading_status)
+    if rated is not None:
+        if rated:
+            conditions.append("rating IS NOT NULL")
+        else:
+            conditions.append("rating IS NULL")
+    if min_rating is not None:
+        conditions.append("rating >= ?")
+        params.append(min_rating)
+    if max_rating is not None:
+        conditions.append("rating <= ?")
+        params.append(max_rating)
+    if is_favorite is not None:
+        conditions.append("is_favorite = ?")
+        params.append(1 if is_favorite else 0)
+
+    where = " AND ".join(conditions)
+    conn = get_db()
+    rows = conn.execute(
+        f"""SELECT authors, COUNT(*) as count
+            FROM books
+            WHERE {where}
+            GROUP BY authors
+            ORDER BY count DESC, authors""",
+        params,
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def get_series_autocomplete(user_id: int) -> list[dict]:
@@ -2062,6 +2408,76 @@ def get_hc_series_books(
     return [dict(r) for r in rows]
 
 
+def get_series_due_for_refresh(
+    max_age_days: int = 30,
+    limit: int = 50,
+) -> list[dict]:
+    """Find series needing a refresh from Hardcover.
+
+    Returns series_link rows that have a hardcover_series_id,
+    at least one monitored user_series subscription, and
+    last_checked older than max_age_days (or NULL).
+    Ordered oldest-first.
+    """
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT sl.*
+           FROM series_link sl
+           WHERE sl.hardcover_series_id IS NOT NULL
+               AND EXISTS (
+                   SELECT 1 FROM user_series us
+                   WHERE us.series_link_id = sl.id
+                       AND us.monitored = 1
+               )
+               AND (
+                   sl.last_checked IS NULL
+                   OR sl.last_checked < datetime(
+                       'now', ? || ' days')
+               )
+           ORDER BY sl.last_checked ASC
+           LIMIT ?""",
+        (str(-max_age_days), limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_monitoring_users(
+    series_link_id: int,
+) -> list[dict]:
+    """Get users monitoring a series.
+
+    Returns list of {user_id, display_name} for users
+    with monitored=1 subscriptions to this series.
+    """
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT us.user_id,
+                  COALESCE(us.display_name,
+                      sl.series_name) as display_name
+           FROM user_series us
+           JOIN series_link sl ON sl.id = us.series_link_id
+           WHERE us.series_link_id = ?
+               AND us.monitored = 1""",
+        (series_link_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def touch_series_last_checked(series_link_id: int) -> None:
+    """Update last_checked without changing data_hash."""
+    conn = get_db()
+    conn.execute(
+        """UPDATE series_link
+           SET last_checked = datetime('now')
+           WHERE id = ?""",
+        (series_link_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
 def get_series_entries_with_books(
     series_link_id: int,
     user_id: int,
@@ -2122,6 +2538,13 @@ def update_series_display_name(
            WHERE user_id = ? AND series_link_id = ?""",
         (new_name, user_id, series_link_id),
     )
+    # Get affected book IDs before updating
+    affected = conn.execute(
+        """SELECT id FROM books
+           WHERE series_link_id = ? AND user_id = ?
+               AND file_path IS NOT NULL""",
+        (series_link_id, user_id),
+    ).fetchall()
     conn.execute(
         """UPDATE books SET series = ?
            WHERE series_link_id = ? AND user_id = ?""",
@@ -2129,6 +2552,9 @@ def update_series_display_name(
     )
     conn.commit()
     conn.close()
+
+    for row in affected:
+        sync_book_epub(row["id"], user_id)
 
 
 def update_series_monitored(
@@ -2205,3 +2631,70 @@ def update_series_entry(
 
     conn.commit()
     conn.close()
+
+
+# --- KOReader sync queries ---
+
+
+def get_book_by_koreader_filename(
+    user_id: int, filename: str
+) -> dict | None:
+    """Fast lookup by stored KOReader filename mapping."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM books"
+        " WHERE user_id = ? AND koreader_filename = ?",
+        (user_id, filename),
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return _row_to_book(row)
+
+
+def set_koreader_filename(
+    book_id: int, user_id: int, filename: str
+) -> None:
+    """Store the KOReader filename mapping on a book."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE books SET koreader_filename = ?"
+        " WHERE id = ? AND user_id = ?",
+        (filename, book_id, user_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_book_sync(
+    book_id: int, user_id: int, updates: dict
+) -> bool:
+    """Update sync-related fields on a book.
+
+    Unlike update_book(), does not trigger EPUB metadata
+    sync since reading state is not EPUB metadata.
+    """
+    allowed = {
+        "reading_status", "progress", "rating",
+        "date_finished", "sync_updated_at",
+    }
+    filtered = {
+        k: v for k, v in updates.items() if k in allowed
+    }
+    if not filtered:
+        return False
+
+    sets = ", ".join(f"{k} = ?" for k in filtered)
+    values = list(filtered.values())
+    values.extend([book_id, user_id])
+
+    conn = get_db()
+    cursor = conn.execute(
+        f"UPDATE books SET {sets}"
+        f" WHERE id = ? AND user_id = ?",
+        values,
+    )
+    conn.commit()
+    changed = cursor.rowcount > 0
+    conn.close()
+    return changed

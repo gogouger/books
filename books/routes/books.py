@@ -379,6 +379,9 @@ async def add_book(
                 },
             )
 
+        # Sync EPUB metadata to match DB
+        db.sync_book_epub(book_id, user_id)
+
         book = db.get_book(book_id, user_id)
 
         # Auto-link series in background if book has a series
@@ -1316,6 +1319,10 @@ async def add_book_from_preview(
                     "Failed to download cover from %s",
                     req.cover_url,
                 )
+
+        # Sync EPUB metadata to match DB
+        if has_epub:
+            db.sync_book_epub(book_id, user_id)
 
         book = db.get_book(book_id, user_id)
 

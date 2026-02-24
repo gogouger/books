@@ -1,185 +1,176 @@
-# Kobo + KOReader Integration Plan
+# Kobo + KOReader Integration
 
-Replace Kindle + Goodreads workflow with Kobo + KOReader + self-hosted Books app.
+## Device
 
-## Goal
-
-Replicate the current reading flow with own infrastructure:
-
-1. Browse personal library on e-reader over WiFi (OPDS catalog)
-2. Download and read books
-3. Get prompted to rate when finished (KOReader book status dialog)
-4. Rating + reading status sync back to Books app automatically
-
-## Hardware
-
-**Recommended devices** (all support KOReader without jailbreaking):
-
-- **Kobo Clara 2E** (~$130) - 6" screen, waterproof, USB-C, good value
-- **Kobo Libra 2** (~$150) - 7" screen, page-turn buttons, waterproof
-- **Kobo Sage** (~$230) - 8" screen, stylus support, if you want larger
-
-Any current Kobo works. KOReader installs by copying files to the device via USB -- no
-jailbreak, no firmware modification, no risk.
-
-## KOReader Setup on Kobo
-
-1. Install NickelMenu: copy `KoboRoot.tgz` to `.kobo/` on device, eject, device reboots
-2. Install KOReader: extract release archive to root of Kobo storage
-3. NickelMenu adds a "KOReader" entry to the Kobo menu -- tap to launch
-4. Stock Kobo firmware is preserved, dual-boot between stock reader and KOReader
-
-References:
-
-- NickelMenu: https://github.com/pgaskin/NickelMenu
-- KOReader releases: https://github.com/koreader/koreader/releases (get the Kobo build)
-- KOReader wiki: https://github.com/koreader/koreader/wiki
+- **Model:** Kobo (spaBW)
+- **Firmware:** Linux kobo 4.9.77, armv7l
+- **OS libc:** glibc 2.11.1 (very old -- only static binaries or matching-libc binaries work)
+- **IP:** 192.168.1.253 (DHCP, may change)
+- **Storage:** 12.5G total on `/mnt/onboard`, ~11G free with ~1000 books
+- **Book count:** 998 EPUBs at `/mnt/onboard/books/`
 
 ## Architecture
 
+Use KOReader as primary reader. Books are downloaded on-demand via OPDS, not
+bulk-synced to the device.
+
+- OPDS catalog has rich hierarchical navigation (filters, letter browse) to
+  handle 980+ books on e-ink
+- KOReader downloads individual books when selected in OPDS browser
+- No need to manage 1000 files on device storage
+- Gesture shortcut: bottom-right corner tap opens OPDS browser directly
+  (KOReader Gesture Manager > `opds_show_catalog` action)
+
+Nickel is still installed but not the primary reading interface. NickelMenu
+provides a launcher for KOReader.
+
 ```
-Kobo (KOReader)                     Books Server (FastAPI)
+KOReader (primary reader)          Books Server (FastAPI)
++------------------+               +------------------------+
+| OPDS browser     | --WiFi-->     | /opds/ (rich navigation|
+| (find + download)|               |  with filters + counts)|
+|                  |               |                        |
+| Read books       |               | /api/books/ (web UI)   |
+| Rate on finish   |               |                        |
+| booksync plugin  | --WiFi-->     | /api/kobo/sync         |
+| (progress sync)  |               | (JSON, Basic Auth)     |
+| SSH server       | <--SFTP--     | (device management)    |
++------------------+               +------------------------+
+
+- Only 6-10 active books on device at a time
+- Server is source of truth for library
+- OPDS navigation replaces bulk sync
+- Ratings: on-device via KOReader, synced to server
+- Web UI: browse library, rate books, manage metadata
+```
+
+## SSH Access
+
+KOReader runs a dropbear SSH server on port 2222. This is the only SSH access
+method. Remote commands work directly.
+
+```bash
+ssh -p 2222 root@192.168.1.253 "uname -a"
+ssh -p 2222 root@192.168.1.253 "ls /mnt/onboard/books/"
+```
+
+Passwordless login: public key at
+`/mnt/onboard/.adds/koreader/settings/SSH/authorized_keys`
+
+SFTP server available at `/mnt/onboard/.adds/koreader/sftp-server`.
+
+**Limitation:** Only available while KOReader is running. If KOReader is not
+running (e.g. in Nickel), SSH is not available.
+
+## File Transfer
+
+SFTP via KOReader's SSH server:
+
+```bash
+sftp -P 2222 root@192.168.1.253
+```
+
+## OPDS
+
+- Catalog: `https://books.mclauthlin.com/opds/`
+- Auth: HTTP Basic Auth (username/password via `scripts/set_password.py`)
+- Page size: 2000 (KOReader doesn't follow pagination)
+- All feed links use relative paths (KOReader auth quirk)
+
+### Views
+
+| Route | Description |
+|-------|-------------|
+| `/opds/` | Root - links to each view with total count |
+| `/opds/all` | All books, alpha by title |
+| `/opds/series` | Series names with counts |
+| `/opds/authors` | Author names with counts |
+| `/opds/recent` | Ordered by date_added desc |
+| `/opds/activity` | Ordered by date_finished desc |
+| `/opds/search?q=...` | Full-text search |
+
+### Stackable Filters (query params)
+
+Every view (except root) is a navigation feed showing "Show Books (N)" at top
+plus available filter entries. Adding `?show=1` switches to acquisition feed.
+
+| Param | Values | Effect |
+|-------|--------|--------|
+| `status` | `unread`, `read`, `reading` | Filter by reading_status |
+| `rated` | `yes`, `no` | Has/hasn't got a rating |
+| `rating` | `1`-`5` | Exact star rating (shown after rated=yes) |
+| `favorite` | `yes` | Only favorites |
+| `letter` | `A`-`Z`, `#` | First letter of sort_title (shown when > 50 results) |
+| `show` | `1` | Switch to acquisition feed |
+
+Filters hide themselves when applied or nonsensical (e.g., no rating options
+when rated=no). Letter filter uses sort_title (strips leading articles).
+
+## Sync Architecture: KOReader Plugin
+
+Reading progress, status, and ratings sync between KOReader and the Books server
+via a custom KOReader plugin (`booksync.koplugin`). No Nickel involvement.
+
+```
+KOReader                            Books Server (FastAPI)
 +------------------+                +------------------------+
-| OPDS client      | ---WiFi--->   | /opds/ routes          |
-| (browse + download)              | (Atom XML feeds)       |
-|                  |                |                        |
-| kosync plugin    | ---WiFi--->   | /kosync/ routes        |
-| (reading position)               | (4 REST endpoints)     |
-|                  |                |                        |
-| custom plugin    | ---WiFi--->   | /api/books/{id} PATCH  |
-| (rating + status)                | (existing endpoint)    |
-+------------------+                +------------------------+
+| .sdr sidecars    | ---WiFi--->   | POST /api/kobo/sync    |
+| (percent_finished,               | (JSON, Basic Auth)     |
+|  summary.status, |               |                        |
+|  summary.rating) | <--WiFi---    | Response: merged state |
+|                  |               |                        |
+| booksync.koplugin|               | Fuzzy match filename   |
++------------------+               | -> book_id on first    |
+                                   | contact, then cached   |
+                                    +------------------------+
 ```
 
-## Server-Side Work
+### How It Works
 
-### 1. OPDS Feed (~100-200 lines)
+1. KOReader saves files as `Author - Title.epub` (not by book ID)
+2. Plugin sends filename + title + authors to server
+3. Server resolves to book_id via `koreader_filename` index (fast) or fuzzy match
+   (normalized title + author token overlap) on first contact
+4. Last-write-wins: whichever side has newer `modified` timestamp wins for all fields
+5. Server returns current state; plugin applies if server is newer
 
-Add routes to serve the book catalog as OPDS (Atom XML):
+### Sync Triggers
 
-- `GET /opds/` - Root navigation feed (links to "All Books", "Series", etc.)
-- `GET /opds/all` - Acquisition feed listing all books with download links
-- `GET /opds/series/{name}` - Books in a specific series
-- `GET /opds/search?q=...` - Search results (OpenSearch)
+| Event | Action |
+|-------|--------|
+| Book opened | Sync this book |
+| Every ~20 page turns | Push this book |
+| Book closed | Push this book |
+| Device suspend | Push this book |
+| WiFi connected | Sync all books with sidecars |
+| WiFi disconnecting | Push all dirty books |
+| Menu > Book Sync > Sync all | Sync all books |
 
-Each book entry includes:
+### Plugin Location
 
-- Title, author, description
-- Download link (`rel="http://opds-spec.org/acquisition"`, type `application/epub+zip`)
-- Cover image link (`rel="http://opds-spec.org/image"`)
+`/mnt/onboard/.adds/koreader/plugins/booksync.koplugin/`
 
-Auth: HTTP Basic Auth (KOReader supports it). Map credentials to existing user accounts.
+### Status Mapping
 
-OPDS is simple Atom XML. No library needed -- generate with `xml.etree.ElementTree` or
-templates. Key MIME types:
+| KOReader | Server |
+|----------|--------|
+| `nil` | `unread` |
+| `reading` | `reading` |
+| `complete` | `read` |
+| `abandoned` | `read` |
 
-- Navigation feed: `application/atom+xml;profile=opds-catalog;kind=navigation`
-- Acquisition feed: `application/atom+xml;profile=opds-catalog;kind=acquisition`
-- EPUB files: `application/epub+zip`
+## Installed Mods
 
-### 2. kosync Endpoints (4 endpoints, ~50-100 lines)
+| Mod | Location | Purpose |
+|-----|----------|---------|
+| NickelMenu | `.adds/nm/` | Adds custom menu entries to Nickel, launches KOReader |
+| KOReader | `.adds/koreader/` | Primary e-reader |
 
-Implement the KOReader progress sync protocol:
+## References
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/kosync/users/create` | POST | Register device (username + password) |
-| `/kosync/users/auth` | GET | Authenticate (HTTP Basic via X-Auth-User/X-Auth-Key headers) |
-| `/kosync/syncs/progress` | PUT | Push reading position (document hash, progress, percentage) |
-| `/kosync/syncs/progress/{document}` | GET | Get reading position for a document |
-
-Document identification: MD5 hash of file contents. Need to store a mapping from MD5 hash
-to book_id in the database (compute on upload/import).
-
-Auth uses `X-Auth-User` and `X-Auth-Key` (MD5 of password) headers.
-
-Data to store: `document` (hash), `progress` (position string), `percentage` (float),
-`device`, `device_id`, `timestamp`.
-
-This gives real-time reading progress sync over WiFi. When KOReader is configured to
-point at the Books server, every reading session syncs position automatically.
-
-### 3. Rating/Status Sync (custom KOReader plugin)
-
-This is the piece that doesn't exist yet anywhere. KOReader's built-in Book Status dialog
-already prompts for rating (1-5 stars) and status (reading/complete/abandoned) when you
-finish a book. But it only saves to a local sidecar file.
-
-**Custom plugin approach** (~100-200 lines of Lua):
-
-- Hook into KOReader's `BookStatusWidget` close event or the document close event
-- Read the rating and status from the book's sidecar metadata
-- POST to the Books API: `PATCH /api/books/{id}` with `{rating, is_read, date_finished}`
-- Need to identify which server-side book this is -- use the same MD5 hash as kosync,
-  or match by title/author
-
-Plugin location on device: `koreader/plugins/booksync.koplugin/`
-
-Reference plugins to study:
-
-- `plugins/kosync.koplugin/` - HTTP sync, auth, server communication
-- `plugins/statistics.koplugin/` - Reading event hooks
-- `plugins/bookstatuswidget.koplugin/` - The rating/status dialog itself (if it exists
-  as separate plugin)
-
-### 4. Database Changes
-
-New table or columns needed:
-
-- `books.file_hash` (TEXT) - MD5 hash of EPUB file, computed on upload. Used by kosync
-  to identify books. Index on `(user_id, file_hash)`.
-- New table `reading_progress` - kosync position data:
-  - `user_id`, `document_hash`, `progress`, `percentage`, `device`, `device_id`,
-    `timestamp`
-
-The existing `rating`, `is_read`, and `date_finished` columns on `books` already handle
-the rating/status data. No changes needed there.
-
-## KOReader Configuration (on device)
-
-Once server-side is built:
-
-1. **OPDS catalog**: Search icon > OPDS catalog > + > enter server URL
-   (e.g., `https://books.example.com/opds/`)
-2. **Progress sync**: Settings > Progress sync > Custom sync server >
-   enter URL (e.g., `https://books.example.com/kosync/`)
-3. **Rating sync plugin**: Copy custom plugin to `koreader/plugins/booksync.koplugin/`
-
-## Alternative: Stock Kobo Firmware Data
-
-If reading books in the stock Kobo reader instead of KOReader, data is in
-`/mnt/onboard/.kobo/KoboReader.sqlite` on the device:
-
-```sql
-SELECT Title, Attribution, ReadStatus, ___PercentRead, DateLastRead
-FROM content WHERE ContentType = 6;
--- ReadStatus: 0=unread, 1=reading, 2=finished
-
-SELECT c.Title, r.Rating
-FROM content c JOIN ratings r ON c.ContentID = r.ContentID
-WHERE c.ContentType = 6;
-```
-
-Could write a USB sync script using `kobuddy` (Python) to extract this data periodically.
-Less seamless than KOReader WiFi sync but works as a fallback.
-
-## Implementation Order
-
-1. **OPDS feed** - enables browsing/downloading books on KOReader over WiFi
-2. **kosync endpoints** - enables real-time reading position sync
-3. **File hash computation** - needed for kosync document identification
-4. **Custom KOReader plugin** - enables rating/status sync back to server
-5. **Frontend updates** - show reading progress percentage in the web UI
-
-Steps 1-3 are pure server-side Python. Step 4 is Lua on the device. Step 5 is TypeScript.
-
-## Useful References
-
+- KOReader User Guide: https://koreader.rocks/user_guide/
+- KOReader Wiki: https://github.com/koreader/koreader/wiki
+- KOReader SSH Wiki: https://github.com/koreader/koreader/wiki/SSH
+- Opinionated KOReader Guide: https://www.reddit.com/r/kobo/comments/1gv4jte/an_opinionated_guide_to_koreader/
 - OPDS 1.2 spec: https://specs.opds.io/opds-1.2.html
-- kosync API: https://github.com/koreader/koreader/blob/master/plugins/kosync.koplugin/api.json
-- KOReader plugin dev: https://github.com/koreader/koreader/wiki/Plugin-system
-- pyopds-server (reference): https://github.com/c4software/pyopds-server
-- koreader-sync-server (reference): https://github.com/koreader/koreader-sync-server
-- kobuddy (Kobo DB parser): https://github.com/karlicoss/kobuddy
-- BookLore (has KOReader sync): https://github.com/booklore-app/booklore
-- NickelMenu: https://github.com/pgaskin/NickelMenu
+- KOReader releases: https://github.com/koreader/koreader/releases

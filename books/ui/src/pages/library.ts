@@ -12,7 +12,9 @@ let currentState: FilterState = {
     filter: '',
     sort: 'title',
     order: 'asc',
+    rated: true,
 };
+
 const PAGE_SIZE = 60;
 let pendingAuthorFilter: string | null = null;
 
@@ -24,6 +26,22 @@ let isLoading = false;
 let observer: IntersectionObserver | null = null;
 let lastLoadedState: FilterState | null = null;
 let scrollListener: (() => void) | null = null;
+
+const DEFAULT_STATE: FilterState = {
+    q: '',
+    filter: '',
+    sort: 'title',
+    order: 'asc',
+    rated: true,
+};
+
+export function resetLibraryFilters(): void {
+    currentState = { ...DEFAULT_STATE };
+    allBooks = [];
+    totalBooks = 0;
+    savedScrollY = 0;
+    lastLoadedState = null;
+}
 
 export function setAuthorFilter(author: string): void {
     pendingAuthorFilter = author;
@@ -44,7 +62,7 @@ export function invalidateLibraryCache(): void {
 }
 
 function statesMatch(a: FilterState, b: FilterState): boolean {
-    return a.q === b.q && a.filter === b.filter && a.sort === b.sort && a.order === b.order;
+    return a.q === b.q && a.filter === b.filter && a.sort === b.sort && a.order === b.order && a.rated === b.rated;
 }
 
 function applyAuthorFilter(author: string): void {
@@ -53,6 +71,8 @@ function applyAuthorFilter(author: string): void {
 
     const searchInput = document.getElementById('filter-search') as HTMLInputElement;
     if (searchInput) searchInput.value = author;
+    const clearBtn = document.getElementById('filter-search-clear');
+    if (clearBtn) clearBtn.classList.remove('d-none');
     const sortSelect = document.getElementById('filter-sort') as HTMLSelectElement;
     if (sortSelect) sortSelect.value = 'title';
 
@@ -169,6 +189,7 @@ async function loadMoreBooks(): Promise<void> {
             offset: offset,
         };
         if (currentState.q) params.q = currentState.q;
+        if (currentState.rated !== null) params.rated = currentState.rated;
 
         // Map filter dropdown to API params
         const f = currentState.filter;
@@ -180,8 +201,6 @@ async function loadMoreBooks(): Promise<void> {
             params.is_owned = false;
         } else if (f === 'favorites') {
             params.is_favorite = true;
-        } else if (f === 'unrated') {
-            params.rated = false;
         } else if (f.endsWith('star')) {
             const stars = parseInt(f);
             params.min_rating = stars;
@@ -189,33 +208,12 @@ async function loadMoreBooks(): Promise<void> {
         }
 
         // Auto-filter based on sort field
-        let emptyResult = false;
         if (currentState.sort === 'series') {
             params.has_series = true;
-        } else if (currentState.sort === 'rating') {
-            if (params.rated === false) {
-                emptyResult = true;
-            } else {
-                params.rated = true;
-            }
         } else if (currentState.sort === 'date_finished') {
-            if (params.reading_status && params.reading_status !== 'read') {
-                emptyResult = true;
-            } else {
+            if (!params.reading_status) {
                 params.reading_status = 'read';
             }
-        }
-
-        if (emptyResult) {
-            if (isFirstBatch) {
-                gridContainer.innerHTML = bookGridHtml([]);
-            }
-            totalBooks = 0;
-            if (countEl) countEl.textContent = '0 books';
-            if (sentinel) sentinel.innerHTML = '';
-            isLoading = false;
-            lastLoadedState = { ...currentState };
-            return;
         }
 
         const data = await api.getBooks(username, params);
