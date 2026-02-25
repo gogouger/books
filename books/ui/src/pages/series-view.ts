@@ -156,6 +156,11 @@ function renderSegmentedBar(books: any[]): string {
     const segments = books.map(b => {
         const cls = STATUS_CLASS[b.reading_status] || 'segment-unread';
         const owned = b.is_owned !== 0 ? '' : ' segment-not-owned';
+        const prog = b.progress || 0;
+        if (b.reading_status === 'reading') {
+            const pct = Math.round(prog * 100);
+            return `<div class="series-segment${owned}" style="border-color:#0d6efd;background:linear-gradient(to right,var(--bs-primary) ${pct}%,var(--bs-secondary-bg) ${pct}%)"></div>`;
+        }
         return `<div class="series-segment ${cls}${owned}"></div>`;
     });
     return `<div class="series-segments">${segments.join('')}</div>`;

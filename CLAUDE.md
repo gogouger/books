@@ -55,6 +55,12 @@ cd books/ui && npx esbuild src/main.ts --bundle --outfile=dist/app.js --watch --
   - `covers/{user_id}/{book_id}.jpg` - cover images (served by nginx)
   - `files/{user_id}/{book_id}.epub` - ebook files (served by FastAPI with auth)
 
+### Kobo (KOReader)
+
+- **SSH**: `root@192.168.1.253` port `2222`
+- **Plugin path**: `/mnt/onboard/.adds/koreader/plugins/booksync.koplugin/`
+- **Deploy plugin**: `scp -P 2222 -r koreader/plugins/booksync.koplugin root@192.168.1.253:/mnt/onboard/.adds/koreader/plugins/`
+
 ## Key Conventions
 
 - **Auth**: Google OAuth via `google-auth` library. Frontend gets Google ID token, backend validates with `id_token.verify_oauth2_token()`. `require_user` Annotated dependency on all protected routes. `BOOKS_SECURE=false` bypasses auth in dev (hardcoded user_id=1). `users.json` in `$BOOKS_DATA_DIR` maps Google emails to local usernames.

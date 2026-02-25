@@ -205,7 +205,8 @@ function renderSeriesGrid(container: HTMLElement, series: any[]): void {
             : '';
 
         const segmentsHtml = renderSegmentedBar(
-            s.status_seq || '', s.owned_seq || ''
+            s.status_seq || '', s.owned_seq || '',
+            s.progress_seq || ''
         );
 
         const authorHtml = s.authors
@@ -275,13 +276,22 @@ const STATUS_CLASS: Record<string, string> = {
 };
 
 function renderSegmentedBar(
-    statusSeq: string, ownedSeq: string
+    statusSeq: string, ownedSeq: string, progressSeq: string
 ): string {
+    const progValues = progressSeq
+        ? progressSeq.split(',').map(Number)
+        : [];
     const segments: string[] = [];
     for (let i = 0; i < statusSeq.length; i++) {
         const cls = STATUS_CLASS[statusSeq[i]] || 'segment-unread';
         const owned = ownedSeq[i] !== '0' ? '' : ' segment-not-owned';
-        segments.push(`<div class="series-segment ${cls}${owned}"></div>`);
+        const prog = progValues[i] || 0;
+        if (statusSeq[i] === 'b') {
+            const pct = Math.round(prog * 100);
+            segments.push(`<div class="series-segment${owned}" style="border-color:#0d6efd;background:linear-gradient(to right,var(--bs-primary) ${pct}%,var(--bs-secondary-bg) ${pct}%)"></div>`);
+        } else {
+            segments.push(`<div class="series-segment ${cls}${owned}"></div>`);
+        }
     }
     return `<div class="series-segments">${segments.join('')}</div>`;
 }

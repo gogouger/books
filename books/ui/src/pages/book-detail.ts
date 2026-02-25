@@ -260,6 +260,20 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
                 </div>
             </div>
 
+            ${book.reading_status === 'reading' && book.progress
+                ? `<div class="mt-3" id="progress-bar">
+                       <div class="d-flex justify-content-between align-items-center mb-1">
+                           <small class="text-muted">${(book.progress * 100).toFixed(1)}% complete</small>
+                       </div>
+                       <div class="progress" style="height: 10px; border: 2px solid #0d6efd; border-radius: 3px;">
+                           <div class="progress-bar" role="progressbar"
+                               style="width: ${(book.progress * 100).toFixed(1)}%"
+                               aria-valuenow="${(book.progress * 100).toFixed(1)}"
+                               aria-valuemin="0" aria-valuemax="100"></div>
+                       </div>
+                   </div>`
+                : ''}
+
             ${book.description ? `
                 <div class="mt-4">
                     <h5>Description</h5>
@@ -367,6 +381,30 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
                 });
                 book.reading_status = newStatus;
                 if (updates.date_finished) book.date_finished = updates.date_finished;
+                // Show/hide progress bar based on new status
+                const progressBar = document.getElementById('progress-bar');
+                if (newStatus === 'reading' && book.progress) {
+                    if (!progressBar) {
+                        const pct = (book.progress * 100).toFixed(1);
+                        const el = document.createElement('div');
+                        el.className = 'mt-3';
+                        el.id = 'progress-bar';
+                        el.innerHTML = `
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <small class="text-muted">${pct}% complete</small>
+                            </div>
+                            <div class="progress" style="height: 10px; border: 2px solid #0d6efd; border-radius: 3px;">
+                                <div class="progress-bar" role="progressbar"
+                                    style="width: ${pct}%"
+                                    aria-valuenow="${pct}"
+                                    aria-valuemin="0" aria-valuemax="100"></div>
+                            </div>`;
+                        const row = app.querySelector('.book-detail > .row')!;
+                        row.after(el);
+                    }
+                } else if (progressBar) {
+                    progressBar.remove();
+                }
                 updateCachedBook(book.id, updates);
                 invalidateSeriesCache();
                 showAlert('Status updated', 'success');

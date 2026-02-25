@@ -1893,7 +1893,8 @@ def get_series_list(
                   END as status_char,
                   CASE WHEN b.is_owned = 1
                       THEN '1' ELSE '0'
-                  END as owned_char
+                  END as owned_char,
+                  COALESCE(b.progress, 0) as progress
            FROM books b
            LEFT JOIN series_entries se
                ON se.series_link_id = b.series_link_id
@@ -1908,18 +1909,22 @@ def get_series_list(
     ).fetchall()
     conn.close()
 
-    seqs: dict[int, tuple[list[str], list[str]]] = {}
+    seqs: dict[int, tuple[list[str], list[str], list[float]]] = {}
     for r in book_rows:
-        s, o = seqs.setdefault(
-            r["series_link_id"], ([], [])
+        s, o, p = seqs.setdefault(
+            r["series_link_id"], ([], [], [])
         )
         s.append(r["status_char"])
         o.append(r["owned_char"])
+        p.append(r["progress"])
 
     for s in series_list:
-        pair = seqs.get(s["series_link_id"], ([], []))
-        s["status_seq"] = "".join(pair[0])
-        s["owned_seq"] = "".join(pair[1])
+        trip = seqs.get(s["series_link_id"], ([], [], []))
+        s["status_seq"] = "".join(trip[0])
+        s["owned_seq"] = "".join(trip[1])
+        s["progress_seq"] = ",".join(
+            f"{v:.2f}" for v in trip[2]
+        )
 
     return series_list
 

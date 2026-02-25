@@ -150,6 +150,27 @@ function BookSync:showServerSettings()
                     end,
                 },
                 {
+                    text = _("Test"),
+                    callback = function()
+                        local fields = self.settings_dialog:getFields()
+                        self:saveSetting("server_url", fields[1])
+                        self:saveSetting("username", fields[2])
+                        self:saveSetting("password", fields[3])
+                        local result, err = self:httpPost("/api/kobo/sync", { books = {} })
+                        if result then
+                            UIManager:show(InfoMessage:new{
+                                text = _("Connection successful!"),
+                                timeout = 3,
+                            })
+                        else
+                            UIManager:show(InfoMessage:new{
+                                text = T(_("Connection failed: %1"), err),
+                                timeout = 5,
+                            })
+                        end
+                    end,
+                },
+                {
                     text = _("Save"),
                     is_enter_default = true,
                     callback = function()
@@ -224,7 +245,12 @@ end
 
 function BookSync:onNetworkConnected()
     if not self:getSetting("auto_sync", true) then return end
-    self:syncAll()
+    -- Delay to let DHCP/DNS settle after WiFi connects
+    UIManager:scheduleIn(5, function()
+        if NetworkMgr:isConnected() then
+            self:syncAll()
+        end
+    end)
 end
 
 function BookSync:onNetworkDisconnecting()
@@ -270,12 +296,9 @@ function BookSync:readBookState(filepath)
         status = "reading"
     end
 
-    -- Ensure we always have a modified timestamp so server
-    -- accepts our state; use current time if sidecar has none
-    local modified = summary.modified
-    if not modified then
-        modified = os.date("!%Y-%m-%dT%H:%M:%SZ")
-    end
+    -- Always use current time; sidecar's summary.modified only updates on
+    -- status/rating changes, not page turns, so it's unreliable for sync
+    local modified = os.date("!%Y-%m-%dT%H:%M:%SZ")
 
     return {
         filename = filename,
@@ -339,6 +362,7 @@ function BookSync:httpPost(url, body)
     local http = require("socket.http")
     local ltn12 = require("ltn12")
     local mime = require("mime")
+    local socketutil = require("socketutil")
 
     local json_body = json.encode(body)
     local response_parts = {}
@@ -346,6 +370,7 @@ function BookSync:httpPost(url, body)
     local auth = mime.b64(settings.username .. ":" .. (settings.password or ""))
     local full_url = settings.server_url:gsub("/$", "") .. url
 
+    socketutil:set_timeout(10, 30)
     local _, code, _headers = http.request{
         url = full_url,
         method = "POST",
@@ -357,7 +382,12 @@ function BookSync:httpPost(url, body)
         source = ltn12.source.string(json_body),
         sink = ltn12.sink.table(response_parts),
     }
+    socketutil:reset_timeout()
 
+    if type(code) ~= "number" then
+        logger.warn("BookSync: connection failed:", code)
+        return nil, tostring(code)
+    end
     if code ~= 200 then
         logger.warn("BookSync: HTTP", code, "from", full_url)
         return nil, "HTTP " .. tostring(code)
@@ -369,6 +399,34 @@ function BookSync:httpPost(url, body)
         return nil, "JSON decode error"
     end
     return result
+end
+
+function BookSync:offerJumpAhead(server_books)
+    if not self.ui.document then return end
+    if not self.ui.document.getProgress then return end
+    local current_file = self.ui.document.file
+    if not current_file then return end
+
+    local current_filename = current_file:match("([^/]+)$")
+    for _, server in ipairs(server_books) do
+        if server.filename == current_filename
+            and server.book_id
+            and server.progress then
+            local local_progress = self.ui.document:getProgress()
+            if server.progress > local_progress + 0.001 then
+                local pct = math.floor(server.progress * 100)
+                local ConfirmBox = require("ui/widget/confirmbox")
+                UIManager:show(ConfirmBox:new{
+                    text = T(_("Server has further progress (%1%%). Jump ahead?"), pct),
+                    ok_text = _("Jump"),
+                    ok_callback = function()
+                        self.ui:handleEvent(Event:new("GotoPercentage", server.progress * 100))
+                    end,
+                })
+            end
+            break
+        end
+    end
 end
 
 function BookSync:syncCurrentBook(show_toast)
@@ -400,6 +458,11 @@ function BookSync:syncCurrentBook(show_toast)
         if server.book_id then
             applied = self:applyServerState(filepath, server)
         end
+    end
+
+    -- If server has further progress for this book, offer to jump
+    if result.books then
+        self:offerJumpAhead(result.books)
     end
 
     if show_toast then
@@ -463,6 +526,9 @@ function BookSync:syncAll(show_toast)
             end
         end
     end
+
+    -- If the currently-open book was updated with further progress, offer to jump
+    self:offerJumpAhead(result.books)
 
     logger.info("BookSync: synced", #books, "books,", applied, "updated from server")
 
