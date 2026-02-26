@@ -1,5 +1,9 @@
 # Feature Plans
 
+- [ ] Currently reading in opds
+- [ ] opds updates for all categories to have letters
+- [ ] auto update plugin
+
 ## Series
 
 - [x] Monthly auto-refresh of series metadata (1/min rate limit, daily check cycle)

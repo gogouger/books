@@ -219,23 +219,42 @@ def _build_filter_entries(
     current_filters: dict,
     user_id: int,
     show_letter: bool = True,
+    count_by_letter_fn=None,
+    extra_db_kwargs: dict | None = None,
+    count_fn=None,
 ) -> list[Element]:
-    """Generate nav entries for available sub-filters."""
-    entries = []
-    base_kwargs = _db_filter_kwargs(current_filters)
+    """Generate nav entries for available sub-filters.
 
-    # Status filters (if status not already set)
-    if "status" not in current_filters:
+    Args:
+        extra_db_kwargs: Additional DB kwargs merged into every
+            count query (e.g. {"reading_status": "reading"}).
+        count_fn: Alternative count function for non-letter
+            filters. Signature: count_fn(user_id, **kwargs).
+            Defaults to db.count_books(user_id, is_owned=True).
+    """
+    entries = []
+    extra = extra_db_kwargs or {}
+    base_kwargs = {**_db_filter_kwargs(current_filters), **extra}
+
+    def _count(kwargs: dict) -> int:
+        merged = {**kwargs, **extra}
+        if count_fn is not None:
+            return count_fn(user_id, **merged)
+        return db.count_books(
+            user_id, is_owned=True, **merged,
+        )
+
+    # Status filters (skip if status already set or if
+    # extra_db_kwargs already constrains reading_status)
+    if ("status" not in current_filters
+            and "reading_status" not in extra):
         for label, val in [
             ("Unread", "unread"),
             ("Read", "read"),
             ("Currently Reading", "reading"),
         ]:
             merged = {**current_filters, "status": val}
-            count = db.count_books(
-                user_id, is_owned=True,
-                **_db_filter_kwargs(merged),
-            )
+            count = _count(_db_filter_kwargs(merged))
             if count > 0:
                 entries.append(_make_nav_entry(
                     f"{label} ({count})",
@@ -251,10 +270,7 @@ def _build_filter_entries(
             ("Unrated", "no"),
         ]:
             merged = {**current_filters, "rated": val}
-            count = db.count_books(
-                user_id, is_owned=True,
-                **_db_filter_kwargs(merged),
-            )
+            count = _count(_db_filter_kwargs(merged))
             if count > 0:
                 entries.append(_make_nav_entry(
                     f"{label} ({count})",
@@ -270,10 +286,7 @@ def _build_filter_entries(
                 if k != "rated"
             }
             merged["rating"] = star
-            count = db.count_books(
-                user_id, is_owned=True,
-                **_db_filter_kwargs(merged),
-            )
+            count = _count(_db_filter_kwargs(merged))
             if count > 0:
                 label = f"{'*' * star} ({count})"
                 entries.append(_make_nav_entry(
@@ -285,10 +298,7 @@ def _build_filter_entries(
     # Favorites (if not set)
     if "favorite" not in current_filters:
         merged = {**current_filters, "favorite": "yes"}
-        count = db.count_books(
-            user_id, is_owned=True,
-            **_db_filter_kwargs(merged),
-        )
+        count = _count(_db_filter_kwargs(merged))
         if count > 0:
             entries.append(_make_nav_entry(
                 f"Favorites ({count})",
@@ -296,20 +306,30 @@ def _build_filter_entries(
                 "Filter to favorite books",
             ))
 
-    # Letter filter (A-Z, #) when > 50 books and not set
+    # Letter filter (A-Z, #) when > 50 items and not set
     if show_letter and "letter" not in current_filters:
         # Strip letter from kwargs for the by-letter query
         letter_kwargs = {
             k: v for k, v in base_kwargs.items()
             if k != "letter"
         }
-        total = db.count_books(
-            user_id, is_owned=True, **letter_kwargs,
-        )
-        if total > 50:
-            counts = db.count_books_by_letter(
-                user_id, is_owned=True, **letter_kwargs,
+        if count_by_letter_fn is not None:
+            counts = count_by_letter_fn(
+                user_id, **letter_kwargs,
             )
+            total = sum(counts.values())
+        else:
+            total = _count(
+                {k: v for k, v in letter_kwargs.items()
+                 if k not in extra},
+            )
+            counts = None
+        if total > 50:
+            if counts is None:
+                counts = db.count_books_by_letter(
+                    user_id, is_owned=True,
+                    **letter_kwargs,
+                )
             if "#" in counts:
                 entries.append(_make_nav_entry(
                     f"# ({counts['#']})",
@@ -427,6 +447,11 @@ def root_catalog(user: basic_auth_user) -> Response:
             "Books ordered by date added",
         ),
         _make_nav_entry(
+            "Currently Reading",
+            "/opds/reading",
+            "Books you are currently reading",
+        ),
+        _make_nav_entry(
             "Recently Read",
             "/opds/activity",
             "Books ordered by date finished",
@@ -506,11 +531,14 @@ def series_list(
     rated: str | None = Query(default=None),
     rating: int | None = Query(default=None, ge=1, le=5),
     favorite: str | None = Query(default=None),
+    letter: str | None = Query(default=None),
     show: str | None = Query(default=None),
 ) -> Response:
     """Series listing - nav with filters or series list."""
     user_id = user["user_id"]
-    filters = _parse_filters(status, rated, rating, favorite)
+    filters = _parse_filters(
+        status, rated, rating, favorite, letter,
+    )
     db_kwargs = _db_filter_kwargs(filters)
 
     if show == "1":
@@ -546,10 +574,14 @@ def series_list(
             label="Show Series",
         ),
     ]
+    def _count_series(user_id, **kwargs):
+        return len(db.get_filtered_series(user_id, **kwargs))
+
     entries.extend(
         _build_filter_entries(
             "/opds/series", filters, user_id,
-            show_letter=False,
+            count_by_letter_fn=db.count_series_by_letter,
+            count_fn=_count_series,
         )
     )
     return _nav_response(
@@ -605,11 +637,14 @@ def authors_list(
     rated: str | None = Query(default=None),
     rating: int | None = Query(default=None, ge=1, le=5),
     favorite: str | None = Query(default=None),
+    letter: str | None = Query(default=None),
     show: str | None = Query(default=None),
 ) -> Response:
     """Author listing - nav with filters or author list."""
     user_id = user["user_id"]
-    filters = _parse_filters(status, rated, rating, favorite)
+    filters = _parse_filters(
+        status, rated, rating, favorite, letter,
+    )
     db_kwargs = _db_filter_kwargs(filters)
 
     if show == "1":
@@ -649,10 +684,16 @@ def authors_list(
             label="Show Authors",
         ),
     ]
+    def _count_authors(user_id, **kwargs):
+        return len(
+            db.get_distinct_authors(user_id, **kwargs)
+        )
+
     entries.extend(
         _build_filter_entries(
             "/opds/authors", filters, user_id,
-            show_letter=False,
+            count_by_letter_fn=db.count_authors_by_letter,
+            count_fn=_count_authors,
         )
     )
     return _nav_response(
@@ -756,6 +797,65 @@ def recent_books(
     )
 
 
+@router.get("/reading")
+def reading_books(
+    user: basic_auth_user,
+    status: str | None = Query(default=None),
+    rated: str | None = Query(default=None),
+    rating: int | None = Query(default=None, ge=1, le=5),
+    favorite: str | None = Query(default=None),
+    letter: str | None = Query(default=None),
+    show: str | None = Query(default=None),
+) -> Response:
+    """Currently reading - nav with filters or book list."""
+    user_id = user["user_id"]
+    filters = _parse_filters(
+        status, rated, rating, favorite, letter,
+    )
+    db_kwargs = _db_filter_kwargs(filters)
+
+    if show == "1":
+        books = db.get_books(
+            user_id, is_owned=True,
+            reading_status="reading",
+            sort="title", order="asc",
+            limit=PAGE_SIZE,
+            **{k: v for k, v in db_kwargs.items()
+               if k != "reading_status"},
+        )
+        return _acq_response(
+            "Currently Reading",
+            f"urn:books:{user_id}:reading",
+            _build_url(
+                "/opds/reading", filters, show="1",
+            ),
+            books, user_id,
+        )
+
+    reading_kwargs = {**db_kwargs}
+    if "reading_status" not in reading_kwargs:
+        reading_kwargs["reading_status"] = "reading"
+    total = db.count_books(
+        user_id, is_owned=True, **reading_kwargs,
+    )
+    entries = [
+        _build_show_entry(
+            "/opds/reading", filters, total,
+        ),
+    ]
+    entries.extend(
+        _build_filter_entries(
+            "/opds/reading", filters, user_id,
+            extra_db_kwargs={"reading_status": "reading"},
+        )
+    )
+    return _nav_response(
+        "Currently Reading",
+        f"urn:books:{user_id}:reading",
+        "/opds/reading", filters, user_id, entries,
+    )
+
+
 @router.get("/activity")
 def activity_books(
     user: basic_auth_user,
@@ -807,6 +907,7 @@ def activity_books(
     entries.extend(
         _build_filter_entries(
             "/opds/activity", filters, user_id,
+            extra_db_kwargs={"reading_status": "read"},
         )
     )
     return _nav_response(

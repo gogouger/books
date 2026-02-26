@@ -59,7 +59,8 @@ cd books/ui && npx esbuild src/main.ts --bundle --outfile=dist/app.js --watch --
 
 - **SSH**: `root@192.168.1.253` port `2222`
 - **Plugin path**: `/mnt/onboard/.adds/koreader/plugins/booksync.koplugin/`
-- **Deploy plugin**: `scp -P 2222 -r koreader/plugins/booksync.koplugin root@192.168.1.253:/mnt/onboard/.adds/koreader/plugins/`
+- **Deploy plugin to Kobo via SSH**: `scp -P 2222 -r koreader/plugins/booksync.koplugin root@192.168.1.253:/mnt/onboard/.adds/koreader/plugins/`
+- **Publish plugin to server**: `./scripts/publish_plugin.sh` - uploads Lua files to the server's publish endpoint (Basic Auth via `.env` creds), auto-increments version. Kobo devices pull updates from the server.
 
 ## Key Conventions
 

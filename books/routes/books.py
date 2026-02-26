@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 import re
 import shutil
@@ -216,6 +217,8 @@ async def add_book(
             content = await file.read()
             f.write(content)
 
+        epub_hash = hashlib.md5(content).hexdigest()
+
         # Extract metadata from epub
         meta = extract_epub_metadata(str(temp_path))
 
@@ -358,9 +361,12 @@ async def add_book(
         final_path = user_files / f"{book_id}.epub"
         shutil.move(str(temp_path), str(final_path))
 
-        # Update file_path in DB
+        # Update file_path and hash in DB
         db.update_book(
-            book_id, user_id, {"file_path": f"{book_id}.epub"}
+            book_id, user_id, {
+                "file_path": f"{book_id}.epub",
+                "epub_hash": epub_hash,
+            }
         )
 
         # Save cover if extracted

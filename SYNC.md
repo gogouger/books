@@ -10,97 +10,92 @@ The Pixel workflow is identical to Kobo: browse OPDS catalog in KOReader, downlo
 
 - **Server is dumb:** always accept pushes (last-write-wins by timestamp, as today). No device tracking.
 - **Device is smart:** on pull, compare server progress vs local. If server is ahead, prompt. If behind, ignore.
-- **Filename mapping is many-to-one:** multiple filenames can point to the same book. No device ID needed.
+- **Hash-based matching:** EPUB MD5 hash is the primary cross-device identifier. Same file content = same book, regardless of filename or directory structure. The existing `koreader_filename` column stays as a fast secondary lookup and gets set on any match.
 - **Transient data ages off:** filename mappings and sync timestamps expire after 90 days. Re-established on next sync if needed.
 
 ## Changes
 
-### 1. Database: many-to-one filename table + cleanup
+### 1. Database: epub_hash column (done)
 
 **File:** `books/helpers/db.py`
 
-Replace the single `koreader_filename` column on `books` with a new table:
+Add `epub_hash` (TEXT) column to `books` table with `(user_id, epub_hash)` index.
 
-```sql
-CREATE TABLE koreader_filenames (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-    filename TEXT NOT NULL,
-    last_seen_at TEXT NOT NULL,
-    UNIQUE(user_id, filename)
-);
-CREATE INDEX idx_koreader_filenames_book
-    ON koreader_filenames(user_id, book_id);
-```
+**Migration** (`_migrate_epub_hash()`):
 
-- `UNIQUE(user_id, filename)` -- a given filename can only map to one book per user
-- `last_seen_at` -- updated on every sync that uses this mapping; used for age-off
-- Multiple filenames can map to the same `(user_id, book_id)` -- handles Kobo and Pixel naming the same book differently
+- Add column + index
+- Backfill: compute MD5 of every existing EPUB file in `$BOOKS_DATA_DIR/files/{user_id}/`
 
-**Migration** (`_migrate_koreader_filenames()`):
+**New db function:**
 
-- Create table + indexes
-- Copy existing data: `INSERT INTO koreader_filenames (user_id, book_id, filename, last_seen_at) SELECT user_id, id, koreader_filename, COALESCE(sync_updated_at, datetime('now')) FROM books WHERE koreader_filename IS NOT NULL`
-- Drop old `idx_books_koreader_filename` index and `koreader_filename` column
+- `get_book_by_epub_hash(user_id, epub_hash)` -- indexed lookup, returns book dict or None
 
-**New db functions** (replacing `get_book_by_koreader_filename` / `set_koreader_filename`):
+**Upload path** (`books/routes/books.py`):
 
-- `get_book_by_filename(user_id, filename)` -- lookup in `koreader_filenames`, also touch `last_seen_at`
-- `set_book_filename(user_id, book_id, filename)` -- INSERT OR REPLACE, sets `last_seen_at` to now
+- Compute MD5 on EPUB upload, store in `epub_hash` column
 
-**Cleanup function** (`cleanup_stale_sync_data()`):
-
-- Delete from `koreader_filenames` where `last_seen_at` < 90 days ago
-- Clear `progress` and `sync_updated_at` on books where `sync_updated_at` < 90 days ago and `reading_status = 'reading'` (stale in-progress books -- completed books keep their state)
-- Called from `init_db()` (runs once per server start, cheap query)
-
-### 2. Backend: simplified sync endpoint
+### 2. Backend: hash-first resolution cascade (done)
 
 **File:** `books/routes/kobo.py`
 
-**No new fields in request/response models.** The `SyncRequest` and `SyncBookOut` stay the same. The device doesn't need to identify itself.
+`epub_hash` added to `SyncBookIn` and `SyncBookOut` models (optional field).
 
-**`_resolve_book()` resolution cascade (simplified):**
+**`_resolve_book()` resolution cascade:**
 
-1. `db.get_book_by_filename(user_id, filename)` -- fast indexed lookup
-2. Fuzzy match (existing normalized title + author token logic)
-3. If matched by either path, call `db.set_book_filename(user_id, book_id, filename)` to cache/refresh
+1. `db.get_book_by_epub_hash(user_id, epub_hash)` -- fastest, content-based, works across renames
+2. `db.get_book_by_koreader_filename(user_id, filename)` -- cached from previous matches
+3. Fuzzy match (normalized title + author token overlap)
+4. On any match, call `db.set_koreader_filename()` to cache the current filename
 
-**`_sync_book()` -- no changes to logic.** Last-write-wins by timestamp continues to work. Server always returns its current state. The device handles the UX.
+**New endpoint:** `GET /api/kobo/ping` -- health check that validates auth, returns `{"status": "ok", "username": "..."}`.
 
-### 3. Plugin: Android support + Kindle-style prompt
+**`_sync_book()` -- no changes to logic.** Last-write-wins by timestamp continues to work. Server always returns its current state (including `epub_hash`). The device handles the UX.
+
+### 3. Plugin: Android support + Kindle-style prompt (done)
 
 **File:** `koreader/plugins/booksync.koplugin/main.lua`
 
-**3a. Configurable books directory:**
+**3a. Configurable books directory (done):**
 
-- Replace hardcoded `books_dir = "/mnt/onboard/books"` with `getBooksDir()` method
-- Platform defaults: Kobo -> `/mnt/onboard/books`, Android -> `DataStorage:getDataDir() .. "/books"`
-- User override via menu setting (Android users may need to set this)
-- Update `buildFilepathMap()` to use `self:getBooksDir()`
+- `getBooksDir()` method with resolution: user setting > `Device.home_dir` > `"."`
+- KOReader's `Device.home_dir` is platform-aware: `/mnt/onboard` on Kobo, `/storage/emulated/0` on Android, etc.
+- User override via menu item (InputDialog, shows current path)
+- `buildFilepathMap()` uses `self:getBooksDir()`
 
-**3b. Kindle-style "continue from" prompt (book open only):**
+**3b. EPUB hash for cross-device matching (done):**
 
-Modify `onReaderReady` to pass a flag: `syncCurrentBook(true, true)` where the second param means "prompt if server is ahead."
+- `readBookState()` computes MD5 hash of the EPUB file via `ffi/md5`
+- Hash is cached in the sidecar data so it's only computed once per book
+- Sent as `epub_hash` in sync request; server uses it as primary match key
 
-After receiving sync response in `syncCurrentBook()`:
+**3c. Kindle-style "continue from" prompt (done):**
 
-- If `prompt_on_cross_device` is true AND `server.progress > local_progress + 0.01`:
-  - Show `ConfirmBox`: "You were at X%. Continue from there?"
-  - **Yes**: apply server state + jump reader to position (via `GotoPercentage` event or equivalent)
-  - **No**: do nothing (local state stays, next page turn will push it to server naturally)
-- Otherwise: apply server state silently as today (handles server-behind and periodic sync cases)
+`offerJumpAhead()` fires after sync when a book is open. If server progress exceeds local progress by >0.1%, shows a ConfirmBox offering to jump. Uses `GotoPercentage` event.
 
-Note: when user declines, we don't need to force-push local state. The next page turn (or book close) will push local progress normally and overwrite the server since it will have a newer timestamp.
+**3d. Other improvements (done):**
 
-**3c. New menu item** in Book Sync submenu:
+- `httpGet()` method for ping endpoint
+- Connection test uses `/api/kobo/ping` instead of empty sync POST
+- `sync_in_progress` guard prevents concurrent syncs
+- `last_sync_fail_time` debounce skips sync on disconnect if server just failed
+- `applyServerState()` handles float epsilon, type guards, synthetic "reading" status
+- Tighter HTTP timeouts (5s connect, 10s total)
+- Better toast messages (show unmatched count)
 
-- Books directory (shows current path, allows override via InputDialog)
+**3e. No changes needed for always-on phone.** Sync is event-driven (page turns, book open/close, suspend). A backgrounded KOReader generates no events.
 
-**3d. No changes needed for always-on phone.** Sync is event-driven (page turns, book open/close, suspend). A backgrounded KOReader generates no events.
+### 4. Stale data cleanup (not yet done)
 
-### 4. Always-on phone concern
+**File:** `books/helpers/db.py`
+
+`cleanup_stale_sync_data()`:
+
+- Clear `progress` and `sync_updated_at` on books where `sync_updated_at` < 90 days ago and `reading_status = 'reading'` (stale in-progress books -- completed books keep their state)
+- Called from `init_db()` (runs once per server start, cheap query)
+
+Note: the `koreader_filenames` table from the original design was not needed. The `epub_hash` approach makes filename mapping a secondary concern -- the existing single `koreader_filename` column is sufficient as a cache since hash matching handles the cross-device case.
+
+### 5. Always-on phone concern
 
 Not a real problem -- confirmed by reviewing sync triggers:
 
@@ -109,23 +104,28 @@ Not a real problem -- confirmed by reviewing sync triggers:
 - `onSuspend`: fires once when app backgrounds
 - No timer/polling
 
-## Implementation order
+## Implementation status
 
-1. `books/helpers/db.py` -- migration, new filename functions, cleanup function
-2. `books/routes/kobo.py` -- update `_resolve_book()` to use new functions
-3. `koreader/plugins/booksync.koplugin/main.lua` -- books dir, prompt logic
-4. `KOBO.md` -- update to reflect multi-device support
+- [x] `books/helpers/db.py` -- `epub_hash` column, migration, backfill (1113 books), lookup function
+- [x] `books/routes/books.py` -- hash on upload
+- [x] `books/routes/kobo.py` -- hash-first resolution, ping endpoint, hash in models
+- [x] `koreader/plugins/booksync.koplugin/main.lua` -- hash computation, books dir, prompt, robustness
+- [x] Backend deployed, migration verified
+- [x] Plugin deployed to Kobo, sync verified working (2026-02-25)
+- [ ] `books/helpers/db.py` -- stale data cleanup
+- [ ] Install KOReader on Pixel, copy plugin, test cross-device sync
 
-## Verification
+## Next step: Android (Pixel 9a)
 
-- Deploy backend first; existing Kobo plugin continues working unchanged (API is the same)
-- Verify migration: `koreader_filenames` table has rows migrated from old column, old column gone
-- Test with curl: POST two syncs with different filenames but same title/author, confirm both resolve to same `book_id` and both filenames are in `koreader_filenames`
-- Test prompt logic: sync book at 50% progress, then open same book locally at 10% -- plugin should prompt
-- Test cleanup: insert a `koreader_filenames` row with `last_seen_at` > 90 days ago, restart server, verify it's deleted
-- On Kobo: update plugin, verify existing sync still works
-- On Android: install KOReader + plugin, configure server + books dir, download book via OPDS, read, verify sync
+1. Install KOReader on the Pixel from F-Droid or GitHub releases
+2. Copy the booksync plugin to the KOReader plugins directory on the phone
+3. Configure server settings (URL, username, password) via Book Sync menu
+4. Set books directory if needed (will default to `Device.home_dir` which is `/storage/emulated/0` on Android)
+5. Add OPDS catalog (server URL + `/api/opds/`) to download a book
+6. Read a few pages, verify sync pushes to server
+7. Open the same book on Kobo, verify the "jump ahead" prompt appears
 
-## Open question: GotoPercentage event
+## Verification log
 
-The KOReader event to jump to a percentage position needs verification during implementation. Candidates: `GotoPercentage`, `GotoPage` with calculated page. If neither works cleanly, fallback to applying sidecar state + toast "Progress updated to X%."
+- 2026-02-25: Backend deployed. Migration backfilled `epub_hash` for 1113 books.
+- 2026-02-25: Plugin deployed to Kobo. Sync verified -- books syncing with hashes and updated timestamps in DB.

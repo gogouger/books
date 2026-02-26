@@ -233,6 +233,8 @@ def init_db() -> None:
     _migrate_archive_user()
     _migrate_series_ignored()
     _migrate_koreader_sync()
+    _migrate_epub_hash()
+    _migrate_sync_version()
     log.info("Database initialized at %s", DB_PATH)
 
 
@@ -1011,6 +1013,82 @@ def _migrate_koreader_sync() -> None:
     conn.close()
 
 
+def _migrate_epub_hash() -> None:
+    """Add epub_hash column with index and backfill from files."""
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(books)"
+        ).fetchall()
+    ]
+    if "epub_hash" in columns:
+        conn.close()
+        return
+
+    log.info("Adding epub_hash column to books")
+    conn.execute(
+        "ALTER TABLE books ADD COLUMN epub_hash TEXT"
+    )
+    conn.execute(
+        "CREATE INDEX idx_books_epub_hash"
+        " ON books(user_id, epub_hash)"
+    )
+
+    # Backfill hashes for existing books with files
+    rows = conn.execute(
+        "SELECT id, user_id, file_path FROM books"
+        " WHERE file_path IS NOT NULL"
+    ).fetchall()
+    backfilled = 0
+    for row in rows:
+        book_id, user_id, file_path = row
+        epub_path = (
+            DATA_DIR / "files" / str(user_id) / file_path
+        )
+        if epub_path.exists():
+            md5 = hashlib.md5(
+                epub_path.read_bytes()
+            ).hexdigest()
+            conn.execute(
+                "UPDATE books SET epub_hash = ?"
+                " WHERE id = ?",
+                (md5, book_id),
+            )
+            backfilled += 1
+    conn.commit()
+    conn.close()
+    log.info("Backfilled epub_hash for %d books", backfilled)
+
+
+def _migrate_sync_version() -> None:
+    """Add sync_version column for optimistic concurrency."""
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(books)"
+        ).fetchall()
+    ]
+    if "sync_version" in columns:
+        conn.close()
+        return
+
+    log.info("Adding sync_version column to books")
+    conn.execute(
+        "ALTER TABLE books ADD COLUMN"
+        " sync_version INTEGER DEFAULT 0"
+    )
+    # Backfill: any book with sync_updated_at has been
+    # synced before, start at version 1
+    conn.execute(
+        "UPDATE books SET sync_version = 1"
+        " WHERE sync_updated_at IS NOT NULL"
+    )
+    conn.commit()
+    conn.close()
+
+
 def update_user_libraries(
     user_id: int, libraries_json: str
 ) -> None:
@@ -1592,7 +1670,7 @@ def update_book(
         "series", "series_index", "series_link_id",
         "description",
         "cover_filename", "cover_updated_at",
-        "file_path", "isbn", "goodreads_id",
+        "file_path", "epub_hash", "isbn", "goodreads_id",
         "tags", "date_finished", "published_date",
         "rating", "reading_status",
         "progress", "is_favorite", "is_owned",
@@ -1936,6 +2014,7 @@ def get_filtered_series(
     min_rating: float | None = None,
     max_rating: float | None = None,
     is_favorite: bool | None = None,
+    letter: str | None = None,
 ) -> list[dict]:
     """Return series with book counts, respecting filters.
 
@@ -1968,11 +2047,28 @@ def get_filtered_series(
         conditions.append("b.is_favorite = ?")
         params.append(1 if is_favorite else 0)
 
+    having = ""
+    series_name_expr = (
+        "COALESCE(us.display_name, sl.series_name)"
+    )
+    if letter is not None:
+        if letter == "#":
+            having = (
+                f" HAVING UPPER(SUBSTR("
+                f"{series_name_expr}, 1, 1))"
+                f" NOT BETWEEN 'A' AND 'Z'"
+            )
+        else:
+            having = (
+                f" HAVING UPPER(SUBSTR("
+                f"{series_name_expr}, 1, 1)) = ?"
+            )
+            params.append(letter.upper())
+
     where = " AND ".join(conditions)
     conn = get_db()
     rows = conn.execute(
-        f"""SELECT COALESCE(us.display_name,
-                sl.series_name) as series,
+        f"""SELECT {series_name_expr} as series,
                 b.series_link_id,
                 COUNT(*) as count
             FROM books b
@@ -1982,13 +2078,77 @@ def get_filtered_series(
                 ON us.series_link_id = sl.id
                 AND us.user_id = b.user_id
             WHERE {where}
-            GROUP BY b.series_link_id
-            ORDER BY COALESCE(us.display_name,
-                sl.series_name)""",
+            GROUP BY b.series_link_id{having}
+            ORDER BY {series_name_expr}""",
         params,
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def count_series_by_letter(
+    user_id: int,
+    reading_status: str | None = None,
+    rated: bool | None = None,
+    min_rating: float | None = None,
+    max_rating: float | None = None,
+    is_favorite: bool | None = None,
+) -> dict[str, int]:
+    """Count series grouped by first letter of series name.
+
+    Returns {"A": 5, "B": 3, ..., "#": 1}.
+    """
+    conditions = [
+        "b.user_id = ?",
+        "b.is_owned = 1",
+        "b.series_link_id IS NOT NULL",
+        "b.series_ignored = 0",
+    ]
+    params: list = [user_id]
+
+    if reading_status is not None:
+        conditions.append("b.reading_status = ?")
+        params.append(reading_status)
+    if rated is not None:
+        if rated:
+            conditions.append("b.rating IS NOT NULL")
+        else:
+            conditions.append("b.rating IS NULL")
+    if min_rating is not None:
+        conditions.append("b.rating >= ?")
+        params.append(min_rating)
+    if max_rating is not None:
+        conditions.append("b.rating <= ?")
+        params.append(max_rating)
+    if is_favorite is not None:
+        conditions.append("b.is_favorite = ?")
+        params.append(1 if is_favorite else 0)
+
+    series_name_expr = (
+        "COALESCE(us.display_name, sl.series_name)"
+    )
+    where = " AND ".join(conditions)
+    query = f"""
+        SELECT CASE
+            WHEN UPPER(SUBSTR({series_name_expr}, 1, 1))
+                BETWEEN 'A' AND 'Z'
+            THEN UPPER(SUBSTR({series_name_expr}, 1, 1))
+            ELSE '#'
+        END as letter,
+        COUNT(DISTINCT b.series_link_id) as count
+        FROM books b
+        JOIN series_link sl
+            ON b.series_link_id = sl.id
+        LEFT JOIN user_series us
+            ON us.series_link_id = sl.id
+            AND us.user_id = b.user_id
+        WHERE {where}
+        GROUP BY letter ORDER BY letter
+    """
+    conn = get_db()
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    return {r["letter"]: r["count"] for r in rows}
 
 
 def get_distinct_authors(
@@ -1998,6 +2158,7 @@ def get_distinct_authors(
     min_rating: float | None = None,
     max_rating: float | None = None,
     is_favorite: bool | None = None,
+    letter: str | None = None,
 ) -> list[dict]:
     """Return distinct authors with book counts.
 
@@ -2029,6 +2190,17 @@ def get_distinct_authors(
     if is_favorite is not None:
         conditions.append("is_favorite = ?")
         params.append(1 if is_favorite else 0)
+    if letter is not None:
+        if letter == "#":
+            conditions.append(
+                "UPPER(SUBSTR(authors, 1, 1))"
+                " NOT BETWEEN 'A' AND 'Z'"
+            )
+        else:
+            conditions.append(
+                "UPPER(SUBSTR(authors, 1, 1)) = ?"
+            )
+            params.append(letter.upper())
 
     where = " AND ".join(conditions)
     conn = get_db()
@@ -2042,6 +2214,62 @@ def get_distinct_authors(
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def count_authors_by_letter(
+    user_id: int,
+    reading_status: str | None = None,
+    rated: bool | None = None,
+    min_rating: float | None = None,
+    max_rating: float | None = None,
+    is_favorite: bool | None = None,
+) -> dict[str, int]:
+    """Count distinct authors grouped by first letter.
+
+    Returns {"A": 5, "B": 3, ..., "#": 1}.
+    """
+    conditions = [
+        "user_id = ?",
+        "is_owned = 1",
+        "series_ignored = 0",
+    ]
+    params: list = [user_id]
+
+    if reading_status is not None:
+        conditions.append("reading_status = ?")
+        params.append(reading_status)
+    if rated is not None:
+        if rated:
+            conditions.append("rating IS NOT NULL")
+        else:
+            conditions.append("rating IS NULL")
+    if min_rating is not None:
+        conditions.append("rating >= ?")
+        params.append(min_rating)
+    if max_rating is not None:
+        conditions.append("rating <= ?")
+        params.append(max_rating)
+    if is_favorite is not None:
+        conditions.append("is_favorite = ?")
+        params.append(1 if is_favorite else 0)
+
+    where = " AND ".join(conditions)
+    query = f"""
+        SELECT CASE
+            WHEN UPPER(SUBSTR(authors, 1, 1))
+                BETWEEN 'A' AND 'Z'
+            THEN UPPER(SUBSTR(authors, 1, 1))
+            ELSE '#'
+        END as letter,
+        COUNT(DISTINCT authors) as count
+        FROM books
+        WHERE {where}
+        GROUP BY letter ORDER BY letter
+    """
+    conn = get_db()
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    return {r["letter"]: r["count"] for r in rows}
 
 
 def get_series_autocomplete(user_id: int) -> list[dict]:
@@ -2657,6 +2885,22 @@ def get_book_by_koreader_filename(
     return _row_to_book(row)
 
 
+def get_book_by_epub_hash(
+    user_id: int, epub_hash: str
+) -> dict | None:
+    """Fast lookup by EPUB file MD5 hash."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM books"
+        " WHERE user_id = ? AND epub_hash = ?",
+        (user_id, epub_hash),
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return _row_to_book(row)
+
+
 def set_koreader_filename(
     book_id: int, user_id: int, filename: str
 ) -> None:
@@ -2682,6 +2926,7 @@ def update_book_sync(
     allowed = {
         "reading_status", "progress", "rating",
         "date_finished", "sync_updated_at",
+        "sync_version",
     }
     filtered = {
         k: v for k, v in updates.items() if k in allowed
