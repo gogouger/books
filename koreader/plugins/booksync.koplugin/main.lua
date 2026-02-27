@@ -6,6 +6,9 @@ via POST /api/kobo/sync (JSON, Basic Auth).
 
 Progress is forward-only: server and plugin always keep the
 higher progress value. Progress resets when status leaves "reading".
+
+All HTTP calls run in forked subprocesses to avoid blocking the
+UI thread. Results are returned via pipe and polled by UIManager.
 ]]
 
 local DataStorage = require("datastorage")
@@ -20,11 +23,22 @@ local NetworkMgr = require("ui/network/manager")
 local SpinWidget = require("ui/widget/spinwidget")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
+local ffiutil = require("ffi/util")
 local logger = require("logger")
 local json = require("json")
 local lfs = require("libs/libkoreader-lfs")
 local _ = require("gettext")
-local T = require("ffi/util").template
+local T = ffiutil.template
+
+-- Force glibc to re-read /etc/resolv.conf.
+-- Needed after sleep/wake cycles where dhcpcd rewrites resolv.conf
+-- but the long-running KOReader process has stale resolver state.
+local ffi = require("ffi")
+pcall(ffi.cdef, "int __res_init(void);")
+
+local function resetDNSResolver()
+    pcall(ffi.C.__res_init)
+end
 
 local BookSync = WidgetContainer:extend{
     name = "booksync",
@@ -192,18 +206,20 @@ function BookSync:showServerSettings()
                         self:saveSetting("server_url", fields[1])
                         self:saveSetting("username", fields[2])
                         self:saveSetting("password", fields[3])
-                        local result, err = self:httpGet("/api/kobo/ping")
-                        if result then
-                            UIManager:show(InfoMessage:new{
-                                text = T(_("Connected as %1"), result.username),
-                                timeout = 3,
-                            })
-                        else
-                            UIManager:show(InfoMessage:new{
-                                text = T(_("Connection failed: %1"), err),
-                                timeout = 5,
-                            })
-                        end
+                        self:httpGet("/api/kobo/ping", function(result, err)
+                            if result then
+                                UIManager:show(InfoMessage:new{
+                                    text = T(_("Connected as %1"),
+                                        result.username),
+                                    timeout = 3,
+                                })
+                            else
+                                UIManager:show(InfoMessage:new{
+                                    text = T(_("Connection failed: %1"), err),
+                                    timeout = 5,
+                                })
+                            end
+                        end)
                     end,
                 },
                 {
@@ -339,6 +355,7 @@ end
 
 function BookSync:onNetworkConnected()
     if not self:getSetting("auto_sync", true) then return end
+    resetDNSResolver()
     UIManager:scheduleIn(5, function()
         if NetworkMgr:isConnected() then
             self:syncAll()
@@ -500,43 +517,150 @@ function BookSync:jumpReaderIfAhead(server_progress)
     return false
 end
 
-function BookSync:httpGetRaw(url)
+-- Async HTTP helpers.
+-- All network I/O runs in a forked subprocess so the UI thread
+-- never blocks on DNS resolution or socket timeouts.
+
+function BookSync:asyncHttp(method, path, body_str, callback)
     local settings = self:getSettings()
     if not settings.server_url or not settings.username then
-        return nil, "Not configured"
+        UIManager:nextTick(function()
+            callback(nil, "Not configured")
+        end)
+        return
     end
 
-    local http = require("socket.http")
-    local ltn12 = require("ltn12")
     local mime = require("mime")
-    local socketutil = require("socketutil")
+    local auth_header = "Basic " .. mime.b64(
+        settings.username .. ":" .. (settings.password or ""))
+    local full_url = settings.server_url:gsub("/$", "") .. path
 
-    local response_parts = {}
-    local auth = mime.b64(settings.username .. ":" .. (settings.password or ""))
-    local full_url = settings.server_url:gsub("/$", "") .. url
+    local pid, parent_read_fd = ffiutil.runInSubProcess(
+        function(_pid, write_fd)
+            resetDNSResolver()
 
-    socketutil:set_timeout(5, 10)
-    local _, code, _headers = http.request{
-        url = full_url,
-        method = "GET",
-        headers = {
-            ["Authorization"] = "Basic " .. auth,
-        },
-        sink = ltn12.sink.table(response_parts),
-    }
-    socketutil:reset_timeout()
+            local http = require("socket.http")
+            local ltn12 = require("ltn12")
+            local socketutil = require("socketutil")
 
-    if type(code) ~= "number" then
-        logger.warn("BookSync: connection failed:", code)
-        return nil, tostring(code)
+            local response_parts = {}
+            local req = {
+                url = full_url,
+                method = method,
+                headers = {
+                    ["Authorization"] = auth_header,
+                },
+                sink = ltn12.sink.table(response_parts),
+            }
+            if body_str then
+                req.headers["Content-Type"] = "application/json"
+                req.headers["Content-Length"] = tostring(#body_str)
+                req.source = ltn12.source.string(body_str)
+            end
+
+            socketutil:set_timeout(5, 10)
+            local _, code = http.request(req)
+            socketutil:reset_timeout()
+
+            -- DNS retry: resolver may be stale after sleep/wake
+            if type(code) ~= "number" then
+                resetDNSResolver()
+                response_parts = {}
+                req.sink = ltn12.sink.table(response_parts)
+                if body_str then
+                    req.source = ltn12.source.string(body_str)
+                end
+                socketutil:set_timeout(5, 10)
+                _, code = http.request(req)
+                socketutil:reset_timeout()
+            end
+
+            local envelope
+            if type(code) == "number" then
+                envelope = json.encode({
+                    code = code,
+                    body = table.concat(response_parts),
+                })
+            else
+                envelope = json.encode({
+                    code = 0,
+                    err = tostring(code),
+                })
+            end
+            ffiutil.writeToFD(write_fd, envelope, true)
+        end, true, false)
+
+    if not pid then
+        UIManager:nextTick(function()
+            callback(nil, tostring(parent_read_fd))
+        end)
+        return
     end
-    if code ~= 200 then
-        logger.warn("BookSync: HTTP", code, "from", full_url)
-        return nil, "HTTP " .. tostring(code)
-    end
 
-    return table.concat(response_parts)
+    local check
+    check = function()
+        if ffiutil.isSubProcessDone(pid) then
+            local data = ffiutil.readAllFromFD(parent_read_fd)
+            local ok, envelope = pcall(json.decode, data or "")
+            if ok and envelope then
+                if envelope.code == 200 then
+                    callback(envelope.body, nil)
+                elseif envelope.err then
+                    logger.warn("BookSync: connection failed:",
+                        envelope.err)
+                    callback(nil, envelope.err)
+                else
+                    logger.warn("BookSync: HTTP", envelope.code,
+                        "from", full_url)
+                    callback(nil, "HTTP " .. tostring(envelope.code))
+                end
+            else
+                callback(nil, "Subprocess communication error")
+            end
+        else
+            UIManager:scheduleIn(0.25, check)
+        end
+    end
+    UIManager:scheduleIn(0.25, check)
 end
+
+function BookSync:httpPost(path, body, callback)
+    self:asyncHttp("POST", path, json.encode(body),
+        function(response_body, err)
+            if err then
+                callback(nil, err)
+                return
+            end
+            local ok, result = pcall(json.decode, response_body)
+            if ok then
+                callback(result, nil)
+            else
+                callback(nil, "JSON decode error")
+            end
+        end)
+end
+
+function BookSync:httpGet(path, callback)
+    self:asyncHttp("GET", path, nil,
+        function(response_body, err)
+            if err then
+                callback(nil, err)
+                return
+            end
+            local ok, result = pcall(json.decode, response_body)
+            if ok then
+                callback(result, nil)
+            else
+                callback(nil, "JSON decode error")
+            end
+        end)
+end
+
+function BookSync:httpGetRaw(path, callback)
+    self:asyncHttp("GET", path, nil, callback)
+end
+
+-- Plugin self-update
 
 function BookSync:getPluginDir()
     local src = debug.getinfo(1, "S").source
@@ -558,221 +682,213 @@ function BookSync:getLocalVersion()
     return tonumber(ver) or 0
 end
 
-function BookSync:checkForUpdate()
-    local result, err = self:httpGet("/api/kobo/ping")
-    if not result then
-        return nil, nil, err
-    end
-    local remote_ver = result.plugin_version or 0
-    local local_ver = self:getLocalVersion()
-    return remote_ver, local_ver, nil
-end
-
-function BookSync:performUpdate()
-    local dir = self:getPluginDir()
-    local files = {"_meta.lua", "main.lua"}
-    local new_contents = {}
-
-    -- Download all files first
-    for _, name in ipairs(files) do
-        local content, err = self:httpGetRaw(
-            "/api/kobo/plugin/download/" .. name)
-        if not content then
-            return false, T(_("Download failed for %1: %2"), name, err)
-        end
-        new_contents[name] = content
-    end
-
-    -- Write to .new temp files
-    for _, name in ipairs(files) do
-        local f, err = io.open(dir .. "/" .. name .. ".new", "w")
-        if not f then
-            return false, T(_("Cannot write %1.new: %2"), name, err)
-        end
-        f:write(new_contents[name])
-        f:close()
-    end
-
-    -- Back up originals and swap
-    for _, name in ipairs(files) do
-        local orig = dir .. "/" .. name
-        local bak = orig .. ".bak"
-        local new = orig .. ".new"
-        os.rename(orig, bak)
-        local ok = os.rename(new, orig)
-        if not ok then
-            -- Restore from backup on failure
-            for _, rname in ipairs(files) do
-                local rorig = dir .. "/" .. rname
-                local rbak = rorig .. ".bak"
-                local rnew = rorig .. ".new"
-                if lfs.attributes(rbak, "mode") then
-                    os.rename(rbak, rorig)
-                end
-                os.remove(rnew)
-            end
-            return false, T(_("Failed to install %1"), name)
-        end
-    end
-
-    -- Clean up .bak files
-    for _, name in ipairs(files) do
-        os.remove(dir .. "/" .. name .. ".bak")
-    end
-
-    return true
-end
-
 function BookSync:promptUpdateCheck()
-    local remote_ver, local_ver, err = self:checkForUpdate()
-    if err then
-        UIManager:show(InfoMessage:new{
-            text = T(_("Update check failed: %1"), err),
-            timeout = 5,
+    self:httpGet("/api/kobo/ping", function(result, err)
+        if not result then
+            UIManager:show(InfoMessage:new{
+                text = T(_("Update check failed: %1"), err),
+                timeout = 5,
+            })
+            return
+        end
+
+        local remote_ver = result.plugin_version or 0
+        local local_ver = self:getLocalVersion()
+
+        if remote_ver <= local_ver then
+            UIManager:show(InfoMessage:new{
+                text = T(_("Plugin is up to date (v%1)."), local_ver),
+                timeout = 3,
+            })
+            return
+        end
+
+        local ConfirmBox = require("ui/widget/confirmbox")
+        UIManager:show(ConfirmBox:new{
+            text = T(_("Update available: v%1 -> v%2.\nInstall now?"),
+                local_ver, remote_ver),
+            ok_text = _("Update"),
+            cancel_text = _("Later"),
+            ok_callback = function()
+                self:performUpdate(function(ok, update_err)
+                    if ok then
+                        UIManager:show(ConfirmBox:new{
+                            text = _("Update installed. Restart KOReader to activate."),
+                            ok_text = _("Restart"),
+                            cancel_text = _("Later"),
+                            ok_callback = function()
+                                UIManager:broadcastEvent(
+                                    Event:new("RestartKOReader"))
+                            end,
+                        })
+                    else
+                        UIManager:show(InfoMessage:new{
+                            text = T(_("Update failed: %1"), update_err),
+                            timeout = 5,
+                        })
+                    end
+                end)
+            end,
         })
+    end)
+end
+
+-- Download plugin files in a subprocess, then install in the parent.
+function BookSync:performUpdate(callback)
+    local settings = self:getSettings()
+    if not settings.server_url or not settings.username then
+        UIManager:nextTick(function()
+            callback(false, "Not configured")
+        end)
         return
     end
 
-    if remote_ver <= local_ver then
-        UIManager:show(InfoMessage:new{
-            text = T(_("Plugin is up to date (v%1)."), local_ver),
-            timeout = 3,
-        })
-        return
-    end
+    local mime = require("mime")
+    local auth_header = "Basic " .. mime.b64(
+        settings.username .. ":" .. (settings.password or ""))
+    local base_url = settings.server_url:gsub("/$", "")
+    local files = {"_meta.lua", "main.lua"}
+    local dir = self:getPluginDir()
 
-    local ConfirmBox = require("ui/widget/confirmbox")
-    UIManager:show(ConfirmBox:new{
-        text = T(_("Update available: v%1 -> v%2.\nInstall now?"),
-            local_ver, remote_ver),
-        ok_text = _("Update"),
-        cancel_text = _("Later"),
-        ok_callback = function()
-            local ok, update_err = self:performUpdate()
-            if ok then
-                UIManager:show(ConfirmBox:new{
-                    text = _("Update installed. Restart KOReader to activate."),
-                    ok_text = _("Restart"),
-                    cancel_text = _("Later"),
-                    ok_callback = function()
-                        UIManager:broadcastEvent(Event:new("RestartKOReader"))
-                    end,
-                })
-            else
-                UIManager:show(InfoMessage:new{
-                    text = T(_("Update failed: %1"), update_err),
-                    timeout = 5,
-                })
+    local pid, parent_read_fd = ffiutil.runInSubProcess(
+        function(_pid, write_fd)
+            resetDNSResolver()
+
+            local http = require("socket.http")
+            local ltn12 = require("ltn12")
+            local socketutil = require("socketutil")
+
+            local new_contents = {}
+            for _, name in ipairs(files) do
+                local response_parts = {}
+                local req = {
+                    url = base_url
+                        .. "/api/kobo/plugin/download/" .. name,
+                    method = "GET",
+                    headers = {
+                        ["Authorization"] = auth_header,
+                    },
+                    sink = ltn12.sink.table(response_parts),
+                }
+                socketutil:set_timeout(5, 10)
+                local _, code = http.request(req)
+                socketutil:reset_timeout()
+
+                if type(code) ~= "number" then
+                    resetDNSResolver()
+                    response_parts = {}
+                    req.sink = ltn12.sink.table(response_parts)
+                    socketutil:set_timeout(5, 10)
+                    _, code = http.request(req)
+                    socketutil:reset_timeout()
+                end
+
+                if type(code) ~= "number" or code ~= 200 then
+                    local err_msg = type(code) == "number"
+                        and ("HTTP " .. tostring(code))
+                        or tostring(code)
+                    ffiutil.writeToFD(write_fd, json.encode({
+                        ok = false,
+                        err = name .. ": " .. err_msg,
+                    }), true)
+                    return
+                end
+                new_contents[name] = table.concat(response_parts)
             end
-        end,
-    })
+
+            ffiutil.writeToFD(write_fd, json.encode({
+                ok = true,
+                files = new_contents,
+            }), true)
+        end, true, false)
+
+    if not pid then
+        UIManager:nextTick(function()
+            callback(false, tostring(parent_read_fd))
+        end)
+        return
+    end
+
+    local check
+    check = function()
+        if ffiutil.isSubProcessDone(pid) then
+            local data = ffiutil.readAllFromFD(parent_read_fd)
+            local parse_ok, envelope = pcall(json.decode, data or "")
+            if not parse_ok or not envelope then
+                callback(false, "Download communication error")
+                return
+            end
+            if not envelope.ok then
+                callback(false, envelope.err or "Download failed")
+                return
+            end
+
+            -- Write to .new temp files
+            for _, name in ipairs(files) do
+                local f, write_err = io.open(
+                    dir .. "/" .. name .. ".new", "w")
+                if not f then
+                    callback(false, T(
+                        _("Cannot write %1.new: %2"),
+                        name, write_err))
+                    return
+                end
+                f:write(envelope.files[name])
+                f:close()
+            end
+
+            -- Back up originals and swap
+            for _, name in ipairs(files) do
+                local orig = dir .. "/" .. name
+                local bak = orig .. ".bak"
+                local new = orig .. ".new"
+                os.rename(orig, bak)
+                local ok = os.rename(new, orig)
+                if not ok then
+                    for _, rname in ipairs(files) do
+                        local rorig = dir .. "/" .. rname
+                        local rbak = rorig .. ".bak"
+                        local rnew = rorig .. ".new"
+                        if lfs.attributes(rbak, "mode") then
+                            os.rename(rbak, rorig)
+                        end
+                        os.remove(rnew)
+                    end
+                    callback(false, T(
+                        _("Failed to install %1"), name))
+                    return
+                end
+            end
+
+            -- Clean up .bak files
+            for _, name in ipairs(files) do
+                os.remove(dir .. "/" .. name .. ".bak")
+            end
+
+            callback(true, nil)
+        else
+            UIManager:scheduleIn(0.25, check)
+        end
+    end
+    UIManager:scheduleIn(0.25, check)
 end
 
-function BookSync:httpPost(url, body)
-    local settings = self:getSettings()
-    if not settings.server_url or not settings.username then
-        return nil, "Not configured"
-    end
-
-    local http = require("socket.http")
-    local ltn12 = require("ltn12")
-    local mime = require("mime")
-    local socketutil = require("socketutil")
-
-    local json_body = json.encode(body)
-    local response_parts = {}
-
-    local auth = mime.b64(settings.username .. ":" .. (settings.password or ""))
-    local full_url = settings.server_url:gsub("/$", "") .. url
-
-    socketutil:set_timeout(5, 10)
-    local _, code, _headers = http.request{
-        url = full_url,
-        method = "POST",
-        headers = {
-            ["Content-Type"] = "application/json",
-            ["Content-Length"] = tostring(#json_body),
-            ["Authorization"] = "Basic " .. auth,
-        },
-        source = ltn12.source.string(json_body),
-        sink = ltn12.sink.table(response_parts),
-    }
-    socketutil:reset_timeout()
-
-    if type(code) ~= "number" then
-        logger.warn("BookSync: connection failed:", code)
-        return nil, tostring(code)
-    end
-    if code ~= 200 then
-        logger.warn("BookSync: HTTP", code, "from", full_url)
-        return nil, "HTTP " .. tostring(code)
-    end
-
-    local response_body = table.concat(response_parts)
-    local ok, result = pcall(json.decode, response_body)
-    if not ok then
-        return nil, "JSON decode error"
-    end
-    return result
-end
-
-function BookSync:httpGet(url)
-    local settings = self:getSettings()
-    if not settings.server_url or not settings.username then
-        return nil, "Not configured"
-    end
-
-    local http = require("socket.http")
-    local ltn12 = require("ltn12")
-    local mime = require("mime")
-    local socketutil = require("socketutil")
-
-    local response_parts = {}
-    local auth = mime.b64(settings.username .. ":" .. (settings.password or ""))
-    local full_url = settings.server_url:gsub("/$", "") .. url
-
-    socketutil:set_timeout(5, 10)
-    local _, code, _headers = http.request{
-        url = full_url,
-        method = "GET",
-        headers = {
-            ["Authorization"] = "Basic " .. auth,
-        },
-        sink = ltn12.sink.table(response_parts),
-    }
-    socketutil:reset_timeout()
-
-    if type(code) ~= "number" then
-        logger.warn("BookSync: connection failed:", code)
-        return nil, tostring(code)
-    end
-    if code ~= 200 then
-        logger.warn("BookSync: HTTP", code, "from", full_url)
-        return nil, "HTTP " .. tostring(code)
-    end
-
-    local response_body = table.concat(response_parts)
-    local ok, result = pcall(json.decode, response_body)
-    if not ok then
-        return nil, "JSON decode error"
-    end
-    return result
-end
+-- Sync operations
 
 function BookSync:syncCurrentBook(show_toast)
-    if self.sync_in_progress then return nil, "Sync already in progress" end
+    if self.sync_in_progress then return end
     -- After a failure, back off for 60s on background syncs.
     -- Allow manual sync (true) and book-open sync ("on_open").
     if not show_toast
         and os.time() - self.last_sync_fail_time < 60 then
-        return nil, "Cooling down after failure"
+        return
     end
-    if not self.ui.document then return nil, "No book open" end
+    if not self.ui.document then return end
     local filepath = self.ui.document.file
-    if not filepath then return nil, "No file path" end
+    if not filepath then return end
 
     local state = self:readBookState(filepath)
-    if not state then return nil, "Cannot read book state" end
+    if not state then return end
 
     -- Use live reader position, not stale sidecar value.
     -- ReaderRolling (EPUB) exposes getLastPercent().
@@ -786,42 +902,42 @@ function BookSync:syncCurrentBook(show_toast)
     end
 
     self.sync_in_progress = true
-    local result, err = self:httpPost("/api/kobo/sync", {
-        books = { state },
-    })
-    self.sync_in_progress = false
-    if not result then
-        self.last_sync_fail_time = os.time()
-        logger.warn("BookSync: sync failed:", err)
-        if show_toast then
-            UIManager:show(InfoMessage:new{
-                text = T(_("Sync failed: %1"), err),
-                timeout = 3,
-            })
-        end
-        return nil, err
-    end
+    self:httpPost("/api/kobo/sync", { books = { state } },
+        function(result, err)
+            self.sync_in_progress = false
+            if not result then
+                self.last_sync_fail_time = os.time()
+                logger.warn("BookSync: sync failed:", err)
+                if show_toast then
+                    UIManager:show(InfoMessage:new{
+                        text = T(_("Sync failed: %1"), err),
+                        timeout = 3,
+                    })
+                end
+                return
+            end
 
-    -- Jump on book open or manual sync, not background page-turn syncs
-    local jumped = false
-    if show_toast and result.books and #result.books > 0 then
-        local server = result.books[1]
-        if server.book_id then
-            jumped = self:jumpReaderIfAhead(server.progress)
-        end
-    end
+            -- Jump on book open or manual sync, not background syncs
+            local jumped = false
+            if show_toast and result.books
+                and #result.books > 0 then
+                local server = result.books[1]
+                if server.book_id then
+                    jumped = self:jumpReaderIfAhead(server.progress)
+                end
+            end
 
-    if show_toast == true and not jumped then
-        UIManager:show(InfoMessage:new{
-            text = _("Synced."),
-            timeout = 2,
-        })
-    end
-    return true
+            if show_toast == true and not jumped then
+                UIManager:show(InfoMessage:new{
+                    text = _("Synced."),
+                    timeout = 2,
+                })
+            end
+        end)
 end
 
 function BookSync:syncAll(show_toast)
-    if self.sync_in_progress then return nil, "Sync already in progress" end
+    if self.sync_in_progress then return end
     local books = self:collectAllBooks()
     if #books == 0 then
         if show_toast then
@@ -830,67 +946,67 @@ function BookSync:syncAll(show_toast)
                 timeout = 2,
             })
         end
-        return nil, "No books"
+        return
     end
 
     self.sync_in_progress = true
-    local result, err = self:httpPost("/api/kobo/sync", {
-        books = books,
-    })
-    self.sync_in_progress = false
-    if not result then
-        self.last_sync_fail_time = os.time()
-        logger.warn("BookSync: sync all failed:", err)
-        if show_toast then
-            UIManager:show(InfoMessage:new{
-                text = T(_("Sync failed: %1"), err),
-                timeout = 3,
-            })
-        end
-        return nil, err
-    end
+    self:httpPost("/api/kobo/sync", { books = books },
+        function(result, err)
+            self.sync_in_progress = false
+            if not result then
+                self.last_sync_fail_time = os.time()
+                logger.warn("BookSync: sync all failed:", err)
+                if show_toast then
+                    UIManager:show(InfoMessage:new{
+                        text = T(_("Sync failed: %1"), err),
+                        timeout = 3,
+                    })
+                end
+                return
+            end
 
-    if not result.books then return true end
+            if not result.books then return end
 
-    local filepath_map = self:buildFilepathMap()
+            local filepath_map = self:buildFilepathMap()
 
-    local matched = 0
-    local applied = 0
-    for _, server in ipairs(result.books) do
-        if server.book_id then
-            matched = matched + 1
-            local filepath = filepath_map[server.filename]
-            if filepath then
-                if self:applyServerState(filepath, server) then
-                    applied = applied + 1
+            local matched = 0
+            local applied = 0
+            for _, server in ipairs(result.books) do
+                if server.book_id then
+                    matched = matched + 1
+                    local filepath = filepath_map[server.filename]
+                    if filepath then
+                        if self:applyServerState(filepath, server)
+                        then
+                            applied = applied + 1
+                        end
+                    end
                 end
             end
-        end
-    end
 
-    local unmatched = #books - matched
-    logger.info("BookSync: synced", #books, "books,",
-        matched, "matched,", applied, "updated,",
-        unmatched, "unmatched")
+            local unmatched = #books - matched
+            logger.info("BookSync: synced", #books, "books,",
+                matched, "matched,", applied, "updated,",
+                unmatched, "unmatched")
 
-    if show_toast then
-        local msg
-        if applied > 0 and unmatched > 0 then
-            msg = T(_("Synced. %1 updated, %2 not matched."),
-                applied, unmatched)
-        elseif applied > 0 then
-            msg = T(_("Synced. %1 updated."), applied)
-        elseif unmatched > 0 then
-            msg = T(_("Synced. %1 not matched."), unmatched)
-        else
-            msg = _("Synced.")
-        end
-        UIManager:show(InfoMessage:new{
-            text = msg,
-            timeout = 3,
-        })
-    end
-    return true
+            if show_toast then
+                local msg
+                if applied > 0 and unmatched > 0 then
+                    msg = T(_("Synced. %1 updated, %2 not matched."),
+                        applied, unmatched)
+                elseif applied > 0 then
+                    msg = T(_("Synced. %1 updated."), applied)
+                elseif unmatched > 0 then
+                    msg = T(_("Synced. %1 not matched."), unmatched)
+                else
+                    msg = _("Synced.")
+                end
+                UIManager:show(InfoMessage:new{
+                    text = msg,
+                    timeout = 3,
+                })
+            end
+        end)
 end
 
 function BookSync:syncAllWithConnect()
@@ -907,7 +1023,7 @@ function BookSync:collectAllBooks()
     local books = {}
     local filepath_map = self:buildFilepathMap()
 
-    for filename, filepath in pairs(filepath_map) do
+    for _filename, filepath in pairs(filepath_map) do
         local state = self:readBookState(filepath)
         if state then
             table.insert(books, state)
