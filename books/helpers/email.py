@@ -9,7 +9,7 @@ log = logging.getLogger(__name__)
 
 SMTP_HOST = config("smtp_host", default="localhost")
 SMTP_PORT = config("smtp_port", default=25, cast=int)
-SMTP_FROM = config("smtp_from", default="maclocke@gmail.com")
+SMTP_FROM = config("smtp_from", default="")
 
 
 async def send_to_kindle(

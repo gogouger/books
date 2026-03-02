@@ -4,13 +4,26 @@ import { updateNavbar } from './pages/login';
 
 declare const google: any;
 
-const GOOGLE_CLIENT_ID = '110972621303-tb5jjugmk28id2mu3ttnpvmecu89b6ak.apps.googleusercontent.com';
+let GOOGLE_CLIENT_ID = '';
 const TOKEN_KEY = 'books_id_token';
 const EMAIL_HINT_KEY = 'books_email_hint';
 
 let googleInitialized = false;
 let lastLoginHint: string | null = null;
 let tokenRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
+
+async function loadConfig(): Promise<void> {
+    if (GOOGLE_CLIENT_ID) return;
+    try {
+        const resp = await fetch('/api/config');
+        if (resp.ok) {
+            const data = await resp.json();
+            GOOGLE_CLIENT_ID = data.google_client_id || '';
+        }
+    } catch {
+        // Config fetch failed; Google Sign-In will not work
+    }
+}
 
 function decodeToken(token: string): any {
     try {
@@ -92,6 +105,8 @@ async function waitForGoogleApi(): Promise<void> {
 }
 
 async function initializeGoogleSignIn(): Promise<void> {
+    await loadConfig();
+    if (!GOOGLE_CLIENT_ID) return;
     const hint = getStoredEmail();
     if (googleInitialized && hint === lastLoginHint) return;
     await waitForGoogleApi();

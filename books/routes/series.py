@@ -74,6 +74,7 @@ def get_series(
         "series_link_id": series_link_id,
         "series": series_name,
         "monitored": bool(us.get("monitored", 1)),
+        "series_complete": bool(us.get("series_complete", 1)),
         "hardcover_url": (
             f"https://hardcover.app/series/{hardcover_slug}"
             if hardcover_slug else None
@@ -137,6 +138,7 @@ class BookIgnore(BaseModel):
 class SeriesUpdate(BaseModel):
     series_name: str | None = None
     monitored: bool | None = None
+    series_complete: bool | None = None
     entries: list[EntryUpdate] | None = None
     book_ignores: list[BookIgnore] | None = None
 
@@ -162,6 +164,11 @@ def update_series(
     if updates.monitored is not None:
         db.update_series_monitored(
             user_id, series_link_id, updates.monitored
+        )
+
+    if updates.series_complete is not None:
+        db.update_series_complete(
+            user_id, series_link_id, updates.series_complete
         )
 
     if updates.entries:
@@ -249,11 +256,20 @@ async def refresh_series(
         user_id, series_link_id, series_name
     )
 
+    # Fetch slug if missing
+    hc_slug = link.get("hardcover_slug")
+    if not hc_slug:
+        slugs = await hardcover.fetch_series_slugs(
+            [hc_series_id]
+        )
+        hc_slug = slugs.get(hc_series_id)
+
     db.link_series(
         series_link_id,
         hc_series_id,
         link.get("hardcover_series_name") or "",
         data_hash=data_hash,
+        hardcover_slug=hc_slug,
     )
 
     # Return fresh edit data

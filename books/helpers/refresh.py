@@ -125,13 +125,21 @@ async def refresh_series_for_all_users(
             uid, series_link_id, display
         )
 
+    # Fetch slug if missing
+    hc_slug = link.get("hardcover_slug")
+    if not hc_slug:
+        slugs = await hardcover.fetch_series_slugs(
+            [hc_series_id]
+        )
+        hc_slug = slugs.get(hc_series_id)
+
     # Update link with new hash and timestamp
     db.link_series(
         series_link_id,
         hc_series_id,
         link.get("hardcover_series_name") or "",
         data_hash=data_hash,
-        hardcover_slug=link.get("hardcover_slug"),
+        hardcover_slug=hc_slug,
     )
 
     log.info(

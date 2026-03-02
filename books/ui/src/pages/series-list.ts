@@ -14,6 +14,7 @@ let cachedSeries: any[] | null = null;
 let savedScrollY = 0;
 let scrollListener: (() => void) | null = null;
 let showHidden = false;
+let showOngoing = false;
 
 let currentState: FilterState = {
     q: '',
@@ -29,6 +30,8 @@ const SERIES_FILTER_OPTIONS: FilterOption[] = [
     { value: 'complete', label: 'Complete' },
     { value: 'in_progress', label: 'In progress' },
     { value: 'unread', label: 'Unread' },
+    { value: '_hr2', label: '', hr: true },
+    { value: 'ongoing', label: 'Ongoing (author writing)' },
 ];
 
 const SERIES_SORT_OPTIONS: SortOption[] = [
@@ -89,12 +92,19 @@ function renderPage(app: HTMLElement): void {
             sortOptions: SERIES_SORT_OPTIONS,
             showRated: false,
         }) +
-        `<div class="mb-3">
+        `<div class="mb-3 d-flex gap-4">
             <div class="form-check form-switch">
                 <input class="form-check-input" type="checkbox" id="show-hidden-toggle"
                        ${showHidden ? 'checked' : ''}>
                 <label class="form-check-label text-muted small" for="show-hidden-toggle">
                     Show hidden series
+                </label>
+            </div>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="show-ongoing-toggle"
+                       ${showOngoing ? 'checked' : ''}>
+                <label class="form-check-label text-muted small" for="show-ongoing-toggle">
+                    Show ongoing series
                 </label>
             </div>
         </div>` +
@@ -114,6 +124,14 @@ function renderPage(app: HTMLElement): void {
         });
     }
 
+    const ongoingToggle = app.querySelector('#show-ongoing-toggle') as HTMLInputElement;
+    if (ongoingToggle) {
+        ongoingToggle.addEventListener('change', () => {
+            showOngoing = ongoingToggle.checked;
+            applyFilters();
+        });
+    }
+
     applyFilters();
 }
 
@@ -121,6 +139,11 @@ function applyFilters(): void {
     if (!cachedSeries) return;
 
     let filtered = cachedSeries;
+
+    // Hide ongoing series unless toggle is on or ongoing filter is active
+    if (!showOngoing && currentState.filter !== 'ongoing') {
+        filtered = filtered.filter(s => s.series_complete !== 0);
+    }
 
     // Search: match against series name and authors
     if (currentState.q) {
@@ -139,6 +162,8 @@ function applyFilters(): void {
         filtered = filtered.filter(s => s.reading_count > 0);
     } else if (f === 'unread') {
         filtered = filtered.filter(s => s.unread_count > 0);
+    } else if (f === 'ongoing') {
+        filtered = filtered.filter(s => s.series_complete === 0);
     }
 
     // Sort
@@ -200,6 +225,10 @@ function renderSeriesGrid(container: HTMLElement, series: any[]): void {
                 ? ' series-card-in-progress'
                 : '';
         const monitoredClass = s.monitored === 0 ? ' series-card-hidden' : '';
+        const ongoingClass = s.series_complete === 0 ? ' series-card-ongoing' : '';
+        const ongoingBadge = s.series_complete === 0
+            ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem">Ongoing</span>'
+            : '';
         const notOwnedLabel = notOwnedCount > 0
             ? ` <span class="text-danger">${notOwnedCount} not owned</span>`
             : '';
@@ -218,9 +247,9 @@ function renderSeriesGrid(container: HTMLElement, series: any[]): void {
 
         html += `
             <div class="col-12 col-sm-6 col-md-4 col-lg-3">
-                <div class="card series-card${completionClass}${monitoredClass} h-100" data-series-id="${s.series_link_id}">
+                <div class="card series-card${completionClass}${monitoredClass}${ongoingClass} h-100" data-series-id="${s.series_link_id}">
                     <div class="card-body">
-                        <h6 class="card-title mb-1">${escapeHtml(s.series)}</h6>
+                        <h6 class="card-title mb-1">${escapeHtml(s.series)}${ongoingBadge}</h6>
                         ${authorHtml}
                         <div class="d-flex justify-content-between text-muted small mb-2">
                             <span>${s.total_books} book${s.total_books !== 1 ? 's' : ''}</span>

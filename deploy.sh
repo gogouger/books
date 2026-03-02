@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJ="/home/andymac/projects/books"
-DEST="/data/containers/books"
+PROJ="${PROJ:-$(cd "$(dirname "$0")" && pwd)}"
+DEST="${DEST:-/data/containers/books}"
 
 echo "=== Building UI ==="
 cd "$PROJ/books/ui"
@@ -21,6 +21,7 @@ rsync -a --delete "$PROJ/pyproject.toml" "$DEST/api/pyproject.toml"
 rsync -a --delete "$PROJ/uv.lock" "$DEST/api/uv.lock"
 rsync -a --delete "$PROJ/README.md" "$DEST/api/README.md"
 rsync -a --delete --exclude ui "$PROJ/books/" "$DEST/api/books/"
+cp "$PROJ/Dockerfile" "$DEST/api/Dockerfile"
 
 echo "=== Syncing config ==="
 cp "$PROJ/.env" "$DEST/api/.env"

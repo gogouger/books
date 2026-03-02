@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS user_series (
         REFERENCES series_link(id) ON DELETE CASCADE,
     monitored INTEGER NOT NULL DEFAULT 1,
     display_name TEXT,
+    series_complete INTEGER NOT NULL DEFAULT 1,
     UNIQUE(user_id, series_link_id)
 );
 
@@ -235,6 +236,7 @@ def init_db() -> None:
     _migrate_koreader_sync()
     _migrate_epub_hash()
     _migrate_sync_version()
+    _migrate_series_complete()
     log.info("Database initialized at %s", DB_PATH)
 
 
@@ -1089,6 +1091,28 @@ def _migrate_sync_version() -> None:
     conn.close()
 
 
+def _migrate_series_complete() -> None:
+    """Add series_complete flag to user_series."""
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(user_series)"
+        ).fetchall()
+    ]
+    if "series_complete" in columns:
+        conn.close()
+        return
+
+    log.info("Adding series_complete column to user_series")
+    conn.execute(
+        "ALTER TABLE user_series ADD COLUMN"
+        " series_complete INTEGER NOT NULL DEFAULT 1"
+    )
+    conn.commit()
+    conn.close()
+
+
 def update_user_libraries(
     user_id: int, libraries_json: str
 ) -> None:
@@ -1905,6 +1929,7 @@ def get_series_list(
                   COALESCE(us.display_name,
                       sl.series_name) as series,
                   us.monitored,
+                  us.series_complete,
                   COUNT(*) as total_books,
                   SUM(CASE WHEN b.reading_status = 'read'
                       THEN 1 ELSE 0 END) as read_count,
@@ -2801,6 +2826,22 @@ def update_series_monitored(
         """UPDATE user_series SET monitored = ?
            WHERE user_id = ? AND series_link_id = ?""",
         (1 if monitored else 0, user_id, series_link_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_series_complete(
+    user_id: int,
+    series_link_id: int,
+    series_complete: bool,
+) -> None:
+    """Set the series_complete flag on user's series."""
+    conn = get_db()
+    conn.execute(
+        """UPDATE user_series SET series_complete = ?
+           WHERE user_id = ? AND series_link_id = ?""",
+        (1 if series_complete else 0, user_id, series_link_id),
     )
     conn.commit()
     conn.close()
