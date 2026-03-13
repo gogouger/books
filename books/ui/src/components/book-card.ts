@@ -37,10 +37,15 @@ export function bookCardHtml(book: any): string {
 
     const ownedClass = book.is_owned === 0 ? ' not-owned' : '';
 
+    const progressBar = book.reading_status === 'reading' && book.progress
+        ? `<div class="card-progress"><div class="card-progress-fill" style="width:${(book.progress * 100).toFixed(1)}%"></div></div>`
+        : '';
+
     return `
         <div class="book-card card${ownedClass}" data-book-id="${book.id}" role="button">
             <div class="cover-container">
                 ${coverImg}
+                ${progressBar}
             </div>
             <div class="card-info">
                 <div class="card-gutter ${gutterClass}">

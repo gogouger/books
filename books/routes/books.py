@@ -427,6 +427,15 @@ def update_book(
             update_data["authors"]
         )
 
+    # Reset progress when moving from "read" back to "reading"/"unread"
+    if "reading_status" in update_data and update_data[
+        "reading_status"
+    ] in ("reading", "unread"):
+        current = db.get_book(book_id, user_id)
+        if current and current.get("reading_status") == "read":
+            update_data.setdefault("progress", 0.0)
+            update_data.setdefault("date_finished", None)
+
     # Resolve series name to series_link_id
     if "series" in update_data:
         if update_data["series"]:

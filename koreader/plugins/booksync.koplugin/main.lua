@@ -168,7 +168,7 @@ function BookSync:addToMainMenu(menu_items)
                 text = _("Sync this book now"),
                 callback = function()
                     if self.ui.document then
-                        self:syncCurrentBook(true)
+                        self:syncCurrentBookWithConnect()
                     else
                         UIManager:show(InfoMessage:new{
                             text = _("No book open."),
@@ -433,7 +433,7 @@ end
 
 function BookSync:onBookSyncCurrent()
     if self.ui.document then
-        self:syncCurrentBook(true)
+        self:syncCurrentBookWithConnect()
     else
         UIManager:show(InfoMessage:new{
             text = _("No book open."),
@@ -1544,6 +1544,16 @@ function BookSync:syncAll(show_toast)
         handleSyncResult(envelope.total or 0, envelope.body)
     end
     UIManager:scheduleIn(0.25, check)
+end
+
+function BookSync:syncCurrentBookWithConnect()
+    if NetworkMgr:isConnected() then
+        self:syncCurrentBook(true)
+    else
+        NetworkMgr:turnOnWifiAndWaitForConnection(function()
+            self:syncCurrentBook(true)
+        end)
+    end
 end
 
 function BookSync:syncAllWithConnect()

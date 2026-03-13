@@ -47,6 +47,7 @@ _STATUS_TO_KOREADER = {
 }
 
 
+
 class SyncBookIn(BaseModel):
     filename: str
     epub_hash: str | None = None
@@ -160,10 +161,15 @@ def _sync_book(
     book: dict,
     client: SyncBookIn,
 ) -> SyncBookOut:
-    """Progress-forward sync: always keep the higher progress.
+    """Sync with web-override support.
 
-    Progress only resets when status leaves 'reading'.
+    When sync_version == 1 (set by web UI changes), the server
+    is authoritative -- client status and progress are ignored.
+    The flag is cleared after the sync so subsequent syncs
+    proceed normally.
     """
+    web_override = bool(book.get("sync_version"))
+
     server_progress = book.get("progress") or 0.0
     client_progress = client.progress or 0.0
 
@@ -173,34 +179,44 @@ def _sync_book(
         ).isoformat(),
     }
 
-    # Status
-    if client.reading_status:
-        server_status = _STATUS_TO_SERVER.get(
-            client.reading_status
+    if web_override:
+        # Web changed state since last sync -- server wins,
+        # clear the flag
+        updates["sync_version"] = 0
+        log.info(
+            "Sync book %d: web override active, ignoring "
+            "client (status=%s progress=%s)",
+            book["id"], client.reading_status,
+            client_progress,
         )
-        if server_status:
-            old_status = book.get("reading_status")
-            updates["reading_status"] = server_status
-            # Leaving "reading" resets progress
-            if (old_status == "reading"
-                    and server_status != "reading"):
-                updates["progress"] = 0.0
-                if server_status == "read" and not book.get(
-                    "date_finished"
-                ):
-                    updates["date_finished"] = (
-                        datetime.now(timezone.utc)
-                        .strftime("%Y-%m-%d")
-                    )
+    else:
+        # Normal sync: accept client status and progress
+        if client.reading_status:
+            server_status = _STATUS_TO_SERVER.get(
+                client.reading_status
+            )
+            if server_status:
+                old_status = book.get("reading_status")
+                updates["reading_status"] = server_status
+                # Leaving "reading" resets progress
+                if (old_status == "reading"
+                        and server_status != "reading"):
+                    updates["progress"] = 0.0
+                    if server_status == "read" and not book.get(
+                        "date_finished"
+                    ):
+                        updates["date_finished"] = (
+                            datetime.now(timezone.utc)
+                            .strftime("%Y-%m-%d")
+                        )
 
-    # Progress: always take the max
-    if "progress" not in updates:
-        updates["progress"] = max(
-            server_progress, client_progress
-        )
+        if "progress" not in updates:
+            updates["progress"] = max(
+                server_progress, client_progress
+            )
 
-    if client.rating is not None:
-        updates["rating"] = int(client.rating)
+        if client.rating is not None:
+            updates["rating"] = int(client.rating)
 
     db.update_book_sync(book["id"], user_id, updates)
     book = db.get_book(book["id"], user_id) or book

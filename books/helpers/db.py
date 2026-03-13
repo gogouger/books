@@ -1081,12 +1081,9 @@ def _migrate_sync_version() -> None:
         "ALTER TABLE books ADD COLUMN"
         " sync_version INTEGER DEFAULT 0"
     )
-    # Backfill: any book with sync_updated_at has been
-    # synced before, start at version 1
-    conn.execute(
-        "UPDATE books SET sync_version = 1"
-        " WHERE sync_updated_at IS NOT NULL"
-    )
+    # All books start at version 0. Web-initiated changes
+    # increment the version; clients start unversioned (0)
+    # and receive the current version in sync responses.
     conn.commit()
     conn.close()
 
@@ -1707,12 +1704,14 @@ def update_book(
         return False
 
     # When reading state changes via web UI, bump sync
-    # timestamp so KOReader picks up the change
+    # timestamp and set override flag so KOReader defers
+    # to the server on the next sync
     sync_fields = {"reading_status", "rating", "progress"}
     if filtered.keys() & sync_fields:
         filtered["sync_updated_at"] = (
             datetime.now(timezone.utc).isoformat()
         )
+        filtered["sync_version"] = 1
 
     sets = ", ".join(f"{k} = ?" for k in filtered)
     values = list(filtered.values())
@@ -2954,6 +2953,8 @@ def set_koreader_filename(
     )
     conn.commit()
     conn.close()
+
+
 
 
 def update_book_sync(

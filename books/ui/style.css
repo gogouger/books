@@ -57,6 +57,21 @@ body {
     font-size: 3rem;
 }
 
+/* Card progress bar (reading status) */
+.card-progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 5px;
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.card-progress-fill {
+    height: 100%;
+    background: #0d6efd;
+}
+
 /* Card info: gutter + text side by side */
 .card-info {
     display: flex;

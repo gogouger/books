@@ -12,7 +12,7 @@ let currentState: FilterState = {
     filter: '',
     sort: 'title',
     order: 'asc',
-    rated: true,
+    rated: null,
 };
 
 const PAGE_SIZE = 60;
@@ -32,7 +32,7 @@ const DEFAULT_STATE: FilterState = {
     filter: '',
     sort: 'title',
     order: 'asc',
-    rated: true,
+    rated: null,
 };
 
 export function resetLibraryFilters(): void {
