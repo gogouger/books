@@ -200,6 +200,9 @@ function applyFilters(): void {
     );
 }
 
+// Category sections rendered top-to-bottom; empty sections are skipped.
+const CATEGORY_ORDER = ['Religious', 'Fiction', 'Other'];
+
 function renderSeriesGrid(container: HTMLElement, series: any[]): void {
     if (series.length === 0) {
         container.innerHTML = `
@@ -211,61 +214,27 @@ function renderSeriesGrid(container: HTMLElement, series: any[]): void {
         return;
     }
 
-    let html = '<div class="row g-3">';
-
+    // Bucket by category. Series sort order from the filter bar is
+    // preserved within each bucket. Unknown categories fall to Other.
+    const buckets: Record<string, any[]> = {
+        Religious: [], Fiction: [], Other: [],
+    };
     for (const s of series) {
-        const avgRating = s.avg_rating
-            ? Math.round(s.avg_rating).toString()
-            : '-';
-
-        const notOwnedCount = s.not_owned_count || 0;
-        const completionClass = s.read_count === s.total_books
-            ? ' series-card-complete'
-            : s.read_count > 0
-                ? ' series-card-in-progress'
-                : '';
-        const monitoredClass = s.monitored === 0 ? ' series-card-hidden' : '';
-        const ongoingClass = s.series_complete === 0 ? ' series-card-ongoing' : '';
-        const ongoingBadge = s.series_complete === 0
-            ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem">Ongoing</span>'
-            : '';
-        const notOwnedLabel = notOwnedCount > 0
-            ? ` <span class="text-danger">${notOwnedCount} not owned</span>`
-            : '';
-
-        const segmentsHtml = renderSegmentedBar(
-            s.status_seq || '', s.owned_seq || '',
-            s.progress_seq || ''
-        );
-
-        const authorHtml = s.authors
-            ? `<div class="text-muted small">${s.authors.split(',').map((a: string) => {
-                const trimmed = a.trim();
-                return `<span class="series-author-link" data-authors="${escapeHtml(trimmed)}">${escapeHtml(trimmed)}</span>`;
-            }).join(', ')}</div>`
-            : '';
-
-        html += `
-            <div class="col-12 col-sm-6 col-md-4 col-lg-3">
-                <div class="card series-card${completionClass}${monitoredClass}${ongoingClass} h-100" data-series-id="${s.series_link_id}">
-                    <div class="card-body">
-                        <h6 class="card-title mb-1">${escapeHtml(s.series)}${ongoingBadge}</h6>
-                        ${authorHtml}
-                        <div class="d-flex justify-content-between text-muted small mb-2">
-                            <span>${s.total_books} book${s.total_books !== 1 ? 's' : ''}</span>
-                            <span>${s.read_count}/${s.total_books} read${notOwnedLabel}</span>
-                        </div>
-                        ${segmentsHtml}
-                        <div class="text-muted small mt-2">
-                            Avg rating: ${avgRating}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
+        const cat = buckets[s.category] ? s.category : 'Other';
+        buckets[cat].push(s);
     }
 
-    html += '</div>';
+    let html = '';
+    for (const cat of CATEGORY_ORDER) {
+        const items = buckets[cat];
+        if (!items || items.length === 0) continue;
+        html += `<h3 class="series-category-heading">${cat}</h3>`;
+        html += '<div class="row g-3 mb-4">';
+        for (const s of items) {
+            html += renderSeriesCard(s);
+        }
+        html += '</div>';
+    }
     container.innerHTML = html;
 
     // Attach click handlers
@@ -286,6 +255,69 @@ function renderSeriesGrid(container: HTMLElement, series: any[]): void {
             }
         });
     });
+}
+
+function renderSeriesCard(s: any): string {
+    const avgRating = s.avg_rating
+        ? Math.round(s.avg_rating).toString()
+        : '-';
+
+    const notOwnedCount = s.not_owned_count || 0;
+    const completionClass = s.read_count === s.total_books
+        ? ' series-card-complete'
+        : s.read_count > 0
+            ? ' series-card-in-progress'
+            : '';
+    const monitoredClass = s.monitored === 0 ? ' series-card-hidden' : '';
+    const ongoingClass = s.series_complete === 0 ? ' series-card-ongoing' : '';
+    const ongoingBadge = s.series_complete === 0
+        ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem">Ongoing</span>'
+        : '';
+    const notOwnedLabel = notOwnedCount > 0
+        ? ` <span class="text-danger">${notOwnedCount} not owned</span>`
+        : '';
+
+    const segmentsHtml = renderSegmentedBar(
+        s.status_seq || '', s.owned_seq || '',
+        s.progress_seq || ''
+    );
+
+    const authorHtml = s.authors
+        ? `<div class="text-muted small">${s.authors.split(',').map((a: string) => {
+            const trimmed = a.trim();
+            return `<span class="series-author-link" data-authors="${escapeHtml(trimmed)}">${escapeHtml(trimmed)}</span>`;
+        }).join(', ')}</div>`
+        : '';
+
+    // Cover comes from the series's first book (lowest series_index,
+    // tiebreaker by id ascending — computed server-side). When that
+    // book has no cover, fall back to a small no-cover placeholder
+    // matching the .no-cover-large pattern used on book detail.
+    const coverHtml = (
+        s.first_book_cover_filename && s.first_book_user_id != null
+    )
+        ? `<div class="series-cover-wrap"><img src="${api.coverUrl(s.first_book_user_id, s.first_book_cover_filename, s.first_book_cover_updated_at)}" alt="${escapeHtml(s.series)}" class="series-cover-img" loading="lazy"></div>`
+        : `<div class="series-cover-wrap"><div class="series-no-cover"><i class="bi bi-book"></i></div></div>`;
+
+    return `
+        <div class="col-12 col-sm-6 col-md-4 col-lg-3">
+            <div class="card series-card${completionClass}${monitoredClass}${ongoingClass} h-100" data-series-id="${s.series_link_id}">
+                ${coverHtml}
+                <div class="card-body">
+                    <h6 class="card-title mb-1">${escapeHtml(s.series)}${ongoingBadge}</h6>
+                    ${authorHtml}
+                    <div class="d-flex justify-content-between text-muted small mb-2">
+                        <span>${s.total_books} book${s.total_books !== 1 ? 's' : ''}</span>
+                        <span>${s.read_count}/${s.total_books} read${notOwnedLabel}</span>
+                    </div>
+                    ${segmentsHtml}
+                    <div class="text-muted small mt-2">
+                        Avg rating: ${avgRating}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 function setupScrollTracking(): void {

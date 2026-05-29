@@ -38,8 +38,9 @@ initThemeToggle();
         if (me) setUser(me);
     }
 
-    // library is the default (no hash)
-    setDefaultRoute(() => renderLibrary());
+    // series overview is the default landing (no hash);
+    // the flat library is still reachable via the Library nav link.
+    setDefaultRoute(() => renderSeriesList());
     addRoute('/book/:id/edit', (p) => renderBookEdit(p));
     addRoute('/book/:id', (p) => renderBookDetail(p));
     addRoute('/series', () => renderSeriesList());
