@@ -12,6 +12,7 @@ from google.oauth2 import id_token
 
 from .db import (
     DATA_DIR,
+    create_user,
     get_user_by_username,
     verify_password,
 )
@@ -19,6 +20,14 @@ from .db import (
 log = logging.getLogger(__name__)
 
 GOOGLE_CLIENT_ID = config("BOOKS_GOOGLE_CLIENT_ID", default="")
+
+# When set, trust identity headers from a reverse proxy that has already
+# authenticated the user (Authelia via Caddy forwards Remote-Email/Remote-Name).
+# MUST stay false on any directly-exposed instance — these headers are spoofable
+# unless an authenticating proxy sits in front of the app.
+TRUST_FORWARD_AUTH = config(
+    "BOOKS_TRUST_FORWARD_AUTH", default=False, cast=bool
+)
 
 _users_path = DATA_DIR / "users.json"
 _users_cache: dict[str, str] = {}
@@ -42,6 +51,33 @@ def _load_users() -> dict[str, str]:
     return _users_cache
 
 
+def _forward_auth_user(request: Request) -> dict | None:
+    """Resolve identity from a trusted reverse proxy (Authelia via Caddy).
+
+    The proxy authenticates the user and forwards Remote-Email (and
+    Remote-Name). First-time SSO users are auto-provisioned. Returns None when
+    no Remote-Email header is present so callers can fall back to token auth.
+    """
+    email = request.headers.get("Remote-Email", "").strip().lower()
+    if not email:
+        return None
+    username = _load_users().get(email) or email.split("@", 1)[0].lower()
+    user = get_user_by_username(username)
+    if user is None:
+        display = (request.headers.get("Remote-Name") or username).strip()
+        # SSO users authenticate via the proxy; store an unusable password hash
+        create_user(username, display or username, password_hash="!sso")
+        user = get_user_by_username(username)
+        log.info("Provisioned SSO user '%s' from %s", username, email)
+    if user is None:
+        return None
+    return {
+        "user_id": user["id"],
+        "username": user["username"],
+        "is_superuser": bool(user.get("is_superuser")),
+    }
+
+
 def _get_user(request: Request) -> dict:
     """Validate Bearer token and return user dict.
 
@@ -52,6 +88,12 @@ def _get_user(request: Request) -> dict:
         HTTPException: 401 if token missing/invalid,
             403 if email not registered.
     """
+    # Trusted reverse-proxy identity (Authelia via Caddy) takes precedence.
+    if TRUST_FORWARD_AUTH:
+        fwd = _forward_auth_user(request)
+        if fwd is not None:
+            return fwd
+
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(

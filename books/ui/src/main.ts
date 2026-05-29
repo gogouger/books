@@ -1,4 +1,4 @@
-import { bootstrapAuth } from './auth';
+import { bootstrapAuth, getUser, setUser, fetchMe } from './auth';
 import { getLibraryUsername } from './context';
 import { addRoute, setDefaultRoute, startRouter } from './router';
 import { initThemeToggle } from './theme';
@@ -13,15 +13,32 @@ import { renderBookEdit } from './pages/book-edit';
 
 initThemeToggle();
 
-const username = getLibraryUsername();
+(async () => {
+    const username = getLibraryUsername();
 
-if (!username) {
-    // Root "/" -- show login page
-    renderLogin();
-    bootstrapAuth();
-    updateNavbar();
-} else {
-    // "/{username}/" -- library is the default (no hash)
+    if (!username) {
+        // Root "/" -- if single sign-on (or a stored token) identifies us,
+        // skip the login page and go straight to our library.
+        const me = await fetchMe();
+        if (me) {
+            setUser(me);
+            window.location.href = `/${me.username}/`;
+            return;
+        }
+        renderLogin();
+        bootstrapAuth();
+        updateNavbar();
+        return;
+    }
+
+    // "/{username}/" -- make sure we know who we are (SSO header or token)
+    // so owner controls (Add Book, etc.) appear without a Google sign-in.
+    if (!getUser()) {
+        const me = await fetchMe();
+        if (me) setUser(me);
+    }
+
+    // library is the default (no hash)
     setDefaultRoute(() => renderLibrary());
     addRoute('/book/:id/edit', (p) => renderBookEdit(p));
     addRoute('/book/:id', (p) => renderBookDetail(p));
@@ -41,4 +58,4 @@ if (!username) {
     document.getElementById('nav-series')?.addEventListener('click', () => {
         resetSeriesFilters();
     });
-}
+})();

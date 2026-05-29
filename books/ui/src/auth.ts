@@ -91,6 +91,23 @@ export function setUser(user: any): void {
     localStorage.setItem('books_user', JSON.stringify(user));
 }
 
+// Resolve the current user from the backend. Works with single sign-on
+// (the reverse proxy forwards the identity header) OR a stored Google token.
+// Returns null when not authenticated. Plain fetch — no 401 login-prompt side
+// effects — so it's safe to call on startup.
+export async function fetchMe(): Promise<any | null> {
+    try {
+        const headers: Record<string, string> = {};
+        const token = getToken();
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const resp = await fetch('/api/auth/me', { credentials: 'include', headers });
+        if (!resp.ok) return null;
+        return await resp.json();
+    } catch {
+        return null;
+    }
+}
+
 async function waitForGoogleApi(): Promise<void> {
     if (typeof google !== 'undefined' && google.accounts && google.accounts.id) return;
     return new Promise((resolve) => {
