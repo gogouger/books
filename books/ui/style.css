@@ -1,21 +1,69 @@
+/* ============================================================
+   Family theme — cream / sea-green / IBM Plex Mono (matches the
+   main ggouger.com site). Bootstrap is re-skinned via CSS vars;
+   the read/reading/owned status colors stay as a semantic legend.
+   ============================================================ */
 :root {
     --cover-ratio: 2 / 3;
     --cover-width-lg: 250px;
     --cover-height-lg: 375px;
-    --page-bg: #f8f9fa;
-    --panel-bg: #ffffff;
-    --muted-bg: #f0f0f0;
+
+    /* family palette — light */
+    --bg: #F4F3EB; --ink: #1a1d1a; --fg: #384039; --muted: #7e8a83;
+    --line: #dfdfd2; --line2: #cdd0c3; --accent: #0e7d6c; --accent-2: #16786a;
+
+    --page-bg: var(--bg);
+    --panel-bg: #fbfaf4;
+    --muted-bg: #ece9dc;
+
+    /* Bootstrap overrides */
+    --bs-body-font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+    --bs-body-bg: var(--bg);
+    --bs-body-color: var(--fg);
+    --bs-emphasis-color: var(--ink);
+    --bs-border-color: var(--line2);
+    --bs-primary: var(--accent);
+    --bs-primary-rgb: 14, 125, 108;
+    --bs-link-color: var(--accent);
+    --bs-link-hover-color: var(--accent-2);
+    --bs-link-color-rgb: 14, 125, 108;
+    --bs-secondary-color: var(--muted);
+    --bs-secondary-bg: var(--muted-bg);
 }
 
 [data-bs-theme="dark"] {
-    --page-bg: #1a1d21;
-    --panel-bg: #212529;
-    --muted-bg: #2b3035;
+    --bg: #0e1411; --ink: #e9efe8; --fg: #c2cbc4; --muted: #7e8a80;
+    --line: #222b26; --line2: #313a33; --accent: #1a8a77; --accent-2: #2fa68f;
+
+    --page-bg: var(--bg);
+    --panel-bg: #141b17;
+    --muted-bg: #1b231e;
+
+    --bs-body-bg: var(--bg);
+    --bs-body-color: var(--fg);
+    --bs-emphasis-color: var(--ink);
+    --bs-border-color: var(--line2);
+    --bs-primary: var(--accent);
+    --bs-primary-rgb: 26, 138, 119;
+    --bs-link-color: var(--accent);
+    --bs-link-hover-color: var(--accent-2);
+    --bs-link-color-rgb: 26, 138, 119;
+    --bs-secondary-color: var(--muted);
+    --bs-secondary-bg: var(--muted-bg);
 }
 
 body {
     background-color: var(--page-bg);
+    font-family: var(--bs-body-font-family);
 }
+
+/* paper grain — light theme only (ported from the main site) */
+body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    mix-blend-mode: multiply; opacity: .06;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+[data-bs-theme="dark"] body::before { display: none; }
 
 /* Book cards */
 .book-card {
@@ -69,7 +117,7 @@ body {
 
 .card-progress-fill {
     height: 100%;
-    background: #0d6efd;
+    background: var(--bs-primary);
 }
 
 /* Card info: gutter + text side by side */
@@ -89,7 +137,7 @@ body {
 }
 
 .gutter-read { background-color: #198754; }
-.gutter-reading { background-color: #0d6efd; }
+.gutter-reading { background-color: #c8893b; }
 .gutter-unread { background-color: var(--bs-border-color); }
 
 .gutter-fav {
@@ -377,7 +425,7 @@ body {
 }
 
 .segment-read { background-color: #198754; border-color: #198754; }
-.segment-reading { background-color: #0d6efd; border-color: #0d6efd; }
+.segment-reading { background-color: #c8893b; border-color: #c8893b; }
 .segment-unread { background-color: var(--bs-border-color); border-color: var(--bs-border-color); }
 .segment-not-owned { border-color: #dc3545; }
 
@@ -387,8 +435,8 @@ body {
 }
 
 .series-book-reading {
-    border-left: 8px solid #0d6efd;
-    background-color: rgba(13, 110, 253, 0.05);
+    border-left: 8px solid #c8893b;
+    background-color: rgba(200, 137, 59, 0.07);
 }
 
 /* Series not-owned books: muted background only, border from status */
@@ -407,7 +455,7 @@ body {
 }
 
 .series-card-in-progress {
-    border-left: 4px solid #0d6efd;
+    border-left: 4px solid #c8893b;
 }
 
 .series-card-hidden {
@@ -533,7 +581,7 @@ body {
 .theme-toggle {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.85);
+    color: var(--muted);
     font-size: 1.1rem;
     padding: 0.25rem 0.5rem;
     cursor: pointer;
@@ -541,5 +589,25 @@ body {
 }
 
 .theme-toggle:hover {
-    color: #fff;
+    color: var(--accent);
 }
+
+/* ============================================================
+   Family chrome — navbar + flat cards (cohesion with the site)
+   ============================================================ */
+.navbar {
+    background-color: var(--panel-bg) !important;
+    border-bottom: 1px solid var(--line);
+}
+.navbar .navbar-brand,
+.navbar .nav-link { color: var(--ink) !important; }
+.navbar .nav-link:hover,
+.navbar .nav-link.active { color: var(--accent) !important; }
+.navbar .navbar-brand .bi { color: var(--accent); }
+.navbar-toggler { border-color: var(--line2); }
+
+/* flatter cards/panels — hairline rules instead of heavy white shadows */
+.book-card { border: 1px solid var(--line2); background: var(--panel-bg); }
+.book-card:hover { box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 18%, transparent); }
+.filter-bar, .detail-panel { background: var(--panel-bg); border: 1px solid var(--line2); box-shadow: none; }
+.book-detail .cover-large { box-shadow: 0 4px 15px rgba(0, 0, 0, .18); }

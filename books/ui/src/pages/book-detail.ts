@@ -265,7 +265,7 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
                        <div class="d-flex justify-content-between align-items-center mb-1">
                            <small class="text-muted">${(book.progress * 100).toFixed(1)}% complete</small>
                        </div>
-                       <div class="progress" style="height: 10px; border: 2px solid #0d6efd; border-radius: 3px;">
+                       <div class="progress" style="height: 10px; border: 2px solid var(--bs-primary); border-radius: 3px;">
                            <div class="progress-bar" role="progressbar"
                                style="width: ${(book.progress * 100).toFixed(1)}%"
                                aria-valuenow="${(book.progress * 100).toFixed(1)}"
@@ -393,7 +393,7 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
                             <div class="d-flex justify-content-between align-items-center mb-1">
                                 <small class="text-muted">${pct}% complete</small>
                             </div>
-                            <div class="progress" style="height: 10px; border: 2px solid #0d6efd; border-radius: 3px;">
+                            <div class="progress" style="height: 10px; border: 2px solid var(--bs-primary); border-radius: 3px;">
                                 <div class="progress-bar" role="progressbar"
                                     style="width: ${pct}%"
                                     aria-valuenow="${pct}"

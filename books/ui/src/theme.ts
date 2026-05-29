@@ -1,7 +1,7 @@
 type Theme = 'light' | 'dark';
 
 function getTheme(): Theme {
-    return (localStorage.getItem('theme') as Theme) || 'dark';
+    return (localStorage.getItem('theme') as Theme) || 'light';
 }
 
 function applyTheme(theme: Theme): void {

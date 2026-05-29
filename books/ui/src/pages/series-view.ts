@@ -192,7 +192,7 @@ function renderSegmentedBar(books: any[]): string {
         const prog = b.progress || 0;
         if (b.reading_status === 'reading') {
             const pct = Math.round(prog * 100);
-            return `<div class="series-segment${owned}" style="border-color:#0d6efd;background:linear-gradient(to right,var(--bs-primary) ${pct}%,var(--bs-secondary-bg) ${pct}%)"></div>`;
+            return `<div class="series-segment${owned}" style="border-color:var(--bs-primary);background:linear-gradient(to right,var(--bs-primary) ${pct}%,var(--bs-secondary-bg) ${pct}%)"></div>`;
         }
         return `<div class="series-segment ${cls}${owned}"></div>`;
     });

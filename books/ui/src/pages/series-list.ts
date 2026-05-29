@@ -317,7 +317,7 @@ function renderSegmentedBar(
         const prog = progValues[i] || 0;
         if (statusSeq[i] === 'b') {
             const pct = Math.round(prog * 100);
-            segments.push(`<div class="series-segment${owned}" style="border-color:#0d6efd;background:linear-gradient(to right,var(--bs-primary) ${pct}%,var(--bs-secondary-bg) ${pct}%)"></div>`);
+            segments.push(`<div class="series-segment${owned}" style="border-color:var(--bs-primary);background:linear-gradient(to right,var(--bs-primary) ${pct}%,var(--bs-secondary-bg) ${pct}%)"></div>`);
         } else {
             segments.push(`<div class="series-segment ${cls}${owned}"></div>`);
         }
