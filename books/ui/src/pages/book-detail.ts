@@ -282,8 +282,34 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
                     </div>
                 </div>
             ` : ''}
+
+            ${book.review ? `
+                <div class="mt-4">
+                    <h5>My Review</h5>
+                    <div class="card card-body bg-body-tertiary">
+                        ${escapeHtml(book.review).replace(/\n/g, '<br>')}
+                    </div>
+                </div>
+            ` : ''}
+
+            ${book.series_link_id ? `
+                <div class="mt-4" id="series-row-section">
+                    <h5>Other books in this series</h5>
+                    <div id="series-row" class="series-row">
+                        <div class="text-muted small">Loading…</div>
+                    </div>
+                </div>
+            ` : ''}
         </div>
     `;
+
+    // Lazy-load the "other books in series" row.
+    if (book.series_link_id) {
+        loadSeriesRow(username, book).catch(() => {
+            const row = document.getElementById('series-row');
+            if (row) row.innerHTML = '<div class="text-muted small">Failed to load.</div>';
+        });
+    }
 
     document.getElementById('back-to-library')!.addEventListener('click', (e) => {
         e.preventDefault();
@@ -513,6 +539,46 @@ function formatDate(dateStr: string): string {
     } catch {
         return dateStr;
     }
+}
+
+async function loadSeriesRow(
+    username: string, currentBook: any,
+): Promise<void> {
+    const data = await api.getSeriesBooks(
+        username, currentBook.series_link_id,
+    );
+    const books: any[] = data.books || [];
+    if (books.length <= 1) {
+        const sec = document.getElementById('series-row-section');
+        if (sec) sec.remove();
+        return;
+    }
+
+    // Server already orders by series_index / hc_position; just be
+    // defensive (clients shouldn't assume).
+    books.sort((a, b) => {
+        const ap = a.hc_position ?? a.series_index ?? 9999;
+        const bp = b.hc_position ?? b.series_index ?? 9999;
+        return ap - bp;
+    });
+
+    const row = document.getElementById('series-row');
+    if (!row) return;
+    row.innerHTML = books.map(b => {
+        const isCurrent = b.id === currentBook.id;
+        const cover = b.cover_filename
+            ? `<img src="${api.coverUrl(b.user_id, b.cover_filename, b.cover_updated_at)}" alt="${escapeAttr(b.title)}" class="series-row-cover" loading="lazy">`
+            : `<div class="series-row-no-cover"><i class="bi bi-book"></i></div>`;
+        const cls = 'series-row-card' + (isCurrent ? ' is-current' : '');
+        const label = isCurrent ? ' <span class="text-muted small">(current)</span>' : '';
+        const href = isCurrent ? '#' : `#/book/${b.id}`;
+        return `
+            <a href="${href}" class="${cls}" data-book-id="${b.id}">
+                ${cover}
+                <div class="series-row-title">${escapeHtml(b.title)}${label}</div>
+            </a>
+        `;
+    }).join('');
 }
 
 
