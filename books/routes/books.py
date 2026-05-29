@@ -45,6 +45,7 @@ class BookUpdate(BaseModel):
     series: str | None = None
     series_index: float | None = None
     description: str | None = None
+    review: str | None = None
     isbn: str | None = None
     published_date: str | None = None
     goodreads_id: str | None = None

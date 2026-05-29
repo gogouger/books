@@ -238,6 +238,7 @@ def init_db() -> None:
     _migrate_sync_version()
     _migrate_series_complete()
     _migrate_book_format()
+    _migrate_review()
     log.info("Database initialized at %s", DB_PATH)
 
 
@@ -624,6 +625,26 @@ def _migrate_book_format() -> None:
     log.info("Adding book_format column to books")
     conn.execute(
         "ALTER TABLE books ADD COLUMN book_format TEXT DEFAULT 'ebook'"
+    )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_review() -> None:
+    """Add a review column (user's own free-text review)."""
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(books)"
+        ).fetchall()
+    ]
+    if "review" in columns:
+        conn.close()
+        return
+    log.info("Adding review column to books")
+    conn.execute(
+        "ALTER TABLE books ADD COLUMN review TEXT"
     )
     conn.commit()
     conn.close()
@@ -1934,6 +1955,53 @@ def sync_book_positions(
         sync_book_epub(bid, user_id)
 
 
+_RELIGIOUS_TAGS = frozenset({
+    "christian", "christianity", "religion", "religious",
+    "theology", "biblical", "bible", "prayer", "sermon",
+    "church", "discipleship", "apologetics", "spirituality",
+})
+
+_FICTION_TAGS = frozenset({
+    "fiction", "fantasy", "sci-fi", "science fiction", "scifi",
+    "romance", "mystery", "thriller", "young adult", "ya",
+    "dystopia", "epic fantasy", "urban fantasy", "paranormal",
+})
+
+
+def _categorize_series(tag_blob: str | None) -> str:
+    """Classify a series by its aggregated tags (case-insensitive).
+
+    Religious wins over Fiction; otherwise Other.
+    """
+    if not tag_blob:
+        return "Other"
+    seen: set[str] = set()
+    try:
+        # tag_blob is concatenated JSON arrays like
+        # '["theology"]||["bible","sermon"]'; just lowercase and scan.
+        lower = tag_blob.lower()
+    except Exception:
+        return "Other"
+    # Religious takes priority
+    for t in _RELIGIOUS_TAGS:
+        # Quote-wrapped match avoids partial-substring false positives
+        # (e.g. "religion" matching inside an unrelated longer tag).
+        if f'"{t}"' in lower:
+            return "Religious"
+    for t in _FICTION_TAGS:
+        if f'"{t}"' in lower:
+            return "Fiction"
+    # Loose fallback: also accept plain substrings (handles tags from
+    # importers that don't quote in JSON, e.g. comma-joined text).
+    for t in _RELIGIOUS_TAGS:
+        if t in lower:
+            return "Religious"
+    for t in _FICTION_TAGS:
+        if t in lower:
+            return "Fiction"
+    return "Other"
+
+
 def get_series_list(
     user_id: int,
     monitored: bool | None = None,
@@ -1991,7 +2059,43 @@ def get_series_list(
                        AND b2.series_ignored = 0
                    GROUP BY b2.author_sort
                    ORDER BY COUNT(*) DESC
-                   LIMIT 1) as author_sort
+                   LIMIT 1) as author_sort,
+                  (SELECT b2.id FROM books b2
+                   WHERE b2.series_link_id
+                       = b.series_link_id
+                       AND b2.user_id = b.user_id
+                       AND b2.series_ignored = 0
+                   ORDER BY (b2.series_index IS NULL),
+                            b2.series_index ASC,
+                            b2.id ASC
+                   LIMIT 1) as first_book_id,
+                  (SELECT b2.user_id FROM books b2
+                   WHERE b2.series_link_id
+                       = b.series_link_id
+                       AND b2.user_id = b.user_id
+                       AND b2.series_ignored = 0
+                   ORDER BY (b2.series_index IS NULL),
+                            b2.series_index ASC,
+                            b2.id ASC
+                   LIMIT 1) as first_book_user_id,
+                  (SELECT b2.cover_filename FROM books b2
+                   WHERE b2.series_link_id
+                       = b.series_link_id
+                       AND b2.user_id = b.user_id
+                       AND b2.series_ignored = 0
+                   ORDER BY (b2.series_index IS NULL),
+                            b2.series_index ASC,
+                            b2.id ASC
+                   LIMIT 1) as first_book_cover_filename,
+                  (SELECT b2.cover_updated_at FROM books b2
+                   WHERE b2.series_link_id
+                       = b.series_link_id
+                       AND b2.user_id = b.user_id
+                       AND b2.series_ignored = 0
+                   ORDER BY (b2.series_index IS NULL),
+                            b2.series_index ASC,
+                            b2.id ASC
+                   LIMIT 1) as first_book_cover_updated_at
            FROM books b
            JOIN series_link sl
                ON b.series_link_id = sl.id
@@ -2033,6 +2137,23 @@ def get_series_list(
                    b.series_index, 999)""",
         (user_id,),
     ).fetchall()
+
+    # Concatenated tag blob per series for category derivation.
+    # Each book's `tags` column is a JSON array string (e.g.
+    # '["theology", "ethics"]') or NULL. Joining with '||' keeps the
+    # cheap substring match safe — no tag contains '||'.
+    tag_rows = conn.execute(
+        """SELECT b.series_link_id,
+                  GROUP_CONCAT(LOWER(b.tags), '||') as tag_blob
+           FROM books b
+           WHERE b.user_id = ?
+               AND b.series_link_id IS NOT NULL
+               AND b.series_ignored = 0
+               AND b.tags IS NOT NULL
+               AND b.tags <> '[]'
+           GROUP BY b.series_link_id""",
+        (user_id,),
+    ).fetchall()
     conn.close()
 
     seqs: dict[int, tuple[list[str], list[str], list[float]]] = {}
@@ -2044,12 +2165,20 @@ def get_series_list(
         o.append(r["owned_char"])
         p.append(r["progress"])
 
+    tag_blobs: dict[int, str] = {
+        r["series_link_id"]: r["tag_blob"] or ""
+        for r in tag_rows
+    }
+
     for s in series_list:
         trip = seqs.get(s["series_link_id"], ([], [], []))
         s["status_seq"] = "".join(trip[0])
         s["owned_seq"] = "".join(trip[1])
         s["progress_seq"] = ",".join(
             f"{v:.2f}" for v in trip[2]
+        )
+        s["category"] = _categorize_series(
+            tag_blobs.get(s["series_link_id"])
         )
 
     return series_list
