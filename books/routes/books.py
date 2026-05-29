@@ -938,6 +938,11 @@ class BookFromPreview(BaseModel):
     merge_with: int | None = None
     force: bool = False
     manual: bool = False
+    format: str | None = None
+    is_owned: int | None = None
+    reading_status: str | None = None
+    rating: int | None = None
+    date_finished: str | None = None
 
 
 class ManualSearchRequest(BaseModel):
@@ -1107,6 +1112,15 @@ async def add_book_from_preview(
                 )
             )
 
+        # Manual (no-EPUB) adds default to OWNED. format/status come from the
+        # request (manual UI + bulk importers); EPUB uploads stay 'ebook'.
+        owned = (req.is_owned if req.is_owned is not None
+                 else (1 if (has_epub or req.manual) else 0))
+        book_format = (req.format or
+                       ("ebook" if has_epub
+                        else ("physical" if req.manual else "ebook")))
+        reading_status = req.reading_status or "unread"
+
         if req.merge_with is not None:
             existing = db.get_book(
                 req.merge_with, user_id
@@ -1127,8 +1141,14 @@ async def add_book_from_preview(
                 "series": req.series,
                 "series_index": req.series_index,
                 "series_link_id": series_link_id,
-                "is_owned": 1 if has_epub else 0,
+                "is_owned": owned,
+                "book_format": book_format,
+                "reading_status": reading_status,
             }
+            if req.rating is not None:
+                merge_data["rating"] = req.rating
+            if req.date_finished:
+                merge_data["date_finished"] = req.date_finished
             if req.description:
                 merge_data["description"] = req.description
             if req.isbn:
@@ -1164,8 +1184,14 @@ async def add_book_from_preview(
                     "series": req.series,
                     "series_index": req.series_index,
                     "series_link_id": series_link_id,
-                    "is_owned": 1 if has_epub else 0,
+                    "is_owned": owned,
+                    "book_format": book_format,
+                    "reading_status": reading_status,
                 }
+                if req.rating is not None:
+                    upgrade["rating"] = req.rating
+                if req.date_finished:
+                    upgrade["date_finished"] = req.date_finished
                 if req.description:
                     upgrade["description"] = (
                         req.description
@@ -1248,11 +1274,12 @@ async def add_book_from_preview(
                     goodreads_id=None,
                     tags=meta.get("tags"),
                     date_added=now,
-                    date_finished=None,
-                    rating=None,
-                    reading_status="unread",
+                    date_finished=req.date_finished,
+                    rating=req.rating,
+                    reading_status=reading_status,
                     series_link_id=series_link_id,
-                    is_owned=1 if has_epub else 0,
+                    is_owned=owned,
+                    book_format=book_format,
                 )
 
         # Move epub to final location

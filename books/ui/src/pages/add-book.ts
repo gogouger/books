@@ -44,20 +44,29 @@ export function renderAddBook(): void {
 
             <div class="card mb-3">
                 <div class="card-body">
-                    <h6>Search by Title</h6>
+                    <h6>Add a physical book or audiobook</h6>
                     <div class="mb-2">
                         <input type="text" class="form-control" id="search-title"
                                placeholder="Title">
                     </div>
-                    <div class="mb-3">
+                    <div class="mb-2">
                         <input type="text" class="form-control" id="search-authors"
                                placeholder="Author (optional)">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small text-muted mb-1">Format</label>
+                        <select class="form-select" id="add-format">
+                            <option value="physical">Physical book</option>
+                            <option value="audiobook">Audiobook</option>
+                            <option value="ebook">Ebook (no file)</option>
+                        </select>
                     </div>
                     <button class="btn btn-outline-primary" id="search-btn">
                         <i class="bi bi-search me-1"></i>Search
                     </button>
                     <p class="text-muted small mt-2 mb-0">
-                        Add a book without an EPUB file. It will be marked as not owned.
+                        Search by title to add a book you own without uploading a file —
+                        the cover and series fill in automatically.
                     </p>
                 </div>
             </div>
@@ -238,6 +247,7 @@ function showManualPreviewPicker(
                 title: values.title || 'Unknown',
                 authors: values.authors || 'Unknown',
                 manual: true,
+                format: (document.getElementById('add-format') as HTMLSelectElement | null)?.value || 'physical',
             };
             if (values.series) payload.series = values.series;
             if (values.series_index) {

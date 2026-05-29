@@ -237,6 +237,7 @@ def init_db() -> None:
     _migrate_epub_hash()
     _migrate_sync_version()
     _migrate_series_complete()
+    _migrate_book_format()
     log.info("Database initialized at %s", DB_PATH)
 
 
@@ -603,6 +604,26 @@ def _migrate_published_date() -> None:
     log.info("Adding published_date column to books")
     conn.execute(
         "ALTER TABLE books ADD COLUMN published_date TEXT"
+    )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_book_format() -> None:
+    """Add a book_format column (ebook | audiobook | physical)."""
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(books)"
+        ).fetchall()
+    ]
+    if "book_format" in columns:
+        conn.close()
+        return
+    log.info("Adding book_format column to books")
+    conn.execute(
+        "ALTER TABLE books ADD COLUMN book_format TEXT DEFAULT 'ebook'"
     )
     conn.commit()
     conn.close()
@@ -1642,6 +1663,7 @@ def insert_book(
     is_owned: int = 1,
     series_link_id: int | None = None,
     published_date: str | None = None,
+    book_format: str = "ebook",
 ) -> int:
     tags_json = json.dumps(tags) if tags else "[]"
     conn = get_db()
@@ -1652,9 +1674,10 @@ def insert_book(
             description, cover_filename,
             file_path, isbn, goodreads_id, tags, date_added,
             date_finished, published_date, rating,
-            reading_status, progress, is_favorite, is_owned
+            reading_status, progress, is_favorite, is_owned,
+            book_format
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                  ?, ?, ?, ?, ?, ?, ?, ?)""",
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             user_id, title, sort_title, authors, author_sort,
             series, series_index, series_link_id,
@@ -1662,6 +1685,7 @@ def insert_book(
             file_path, isbn, goodreads_id, tags_json,
             date_added, date_finished, published_date, rating,
             reading_status, progress, is_favorite, is_owned,
+            book_format,
         ),
     )
     conn.commit()
