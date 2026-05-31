@@ -11,6 +11,7 @@ import {
 } from '../components/filter-bar';
 
 let cachedSeries: any[] | null = null;
+let cachedStandalones: any[] | null = null;
 let savedScrollY = 0;
 let scrollListener: (() => void) | null = null;
 let showHidden = false;
@@ -43,11 +44,13 @@ const SERIES_SORT_OPTIONS: SortOption[] = [
 
 export function invalidateSeriesCache(): void {
     cachedSeries = null;
+    cachedStandalones = null;
 }
 
 export function resetSeriesFilters(): void {
     currentState = { q: '', filter: '', sort: 'title', order: 'asc', rated: null };
     cachedSeries = null;
+    cachedStandalones = null;
     savedScrollY = 0;
 }
 
@@ -73,6 +76,7 @@ export async function renderSeriesList(): Promise<void> {
     try {
         const data = await api.getSeries(username, showHidden);
         cachedSeries = data.series;
+        cachedStandalones = data.standalones || [];
         savedScrollY = 0;
         renderPage(app);
         setupScrollTracking();
@@ -137,39 +141,52 @@ function renderPage(app: HTMLElement): void {
 
 function applyFilters(): void {
     if (!cachedSeries) return;
+    const standalones = cachedStandalones || [];
 
-    let filtered = cachedSeries;
+    let filteredSeries = cachedSeries;
+    let filteredStandalones = standalones;
 
     // Hide ongoing series unless toggle is on or ongoing filter is active
     if (!showOngoing && currentState.filter !== 'ongoing') {
-        filtered = filtered.filter(s => s.series_complete !== 0);
+        filteredSeries = filteredSeries.filter(s => s.series_complete !== 0);
     }
 
-    // Search: match against series name and authors
+    // Search: match against series name + authors; or standalone title + authors
     if (currentState.q) {
         const q = currentState.q.toLowerCase();
-        filtered = filtered.filter(s =>
+        filteredSeries = filteredSeries.filter(s =>
             s.series.toLowerCase().includes(q) ||
             (s.authors && s.authors.toLowerCase().includes(q))
         );
+        filteredStandalones = filteredStandalones.filter(b =>
+            (b.title && b.title.toLowerCase().includes(q)) ||
+            (b.authors && b.authors.toLowerCase().includes(q))
+        );
     }
 
-    // Filter dropdown
+    // Filter dropdown (series-specific filters drop standalones for relevance)
     const f = currentState.filter;
     if (f === 'complete') {
-        filtered = filtered.filter(s => s.read_count === s.total_books);
+        filteredSeries = filteredSeries.filter(s => s.read_count === s.total_books);
+        filteredStandalones = filteredStandalones.filter(b => b.reading_status === 'read');
     } else if (f === 'in_progress') {
-        filtered = filtered.filter(s => s.reading_count > 0);
+        filteredSeries = filteredSeries.filter(s => s.reading_count > 0);
+        filteredStandalones = filteredStandalones.filter(b => b.reading_status === 'reading');
     } else if (f === 'unread') {
-        filtered = filtered.filter(s => s.unread_count > 0);
+        filteredSeries = filteredSeries.filter(s => s.unread_count > 0);
+        filteredStandalones = filteredStandalones.filter(
+            b => b.reading_status !== 'read' && b.reading_status !== 'reading'
+        );
     } else if (f === 'ongoing') {
-        filtered = filtered.filter(s => s.series_complete === 0);
+        filteredSeries = filteredSeries.filter(s => s.series_complete === 0);
+        // "Ongoing" is a series-only concept; hide standalones in this mode.
+        filteredStandalones = [];
     }
 
-    // Sort
+    // Sort series
     const desc = currentState.order === 'desc' ? -1 : 1;
     const sort = currentState.sort;
-    filtered = [...filtered].sort((a, b) => {
+    filteredSeries = [...filteredSeries].sort((a, b) => {
         if (sort === 'author') {
             const aa = (a.author_sort || '').toLowerCase();
             const bb = (b.author_sort || '').toLowerCase();
@@ -181,67 +198,107 @@ function applyFilters(): void {
         } else if (sort === 'books') {
             return (a.total_books - b.total_books) * desc;
         } else {
-            // title (default)
             const aa = a.series.toLowerCase();
             const bb = b.series.toLowerCase();
             return aa < bb ? -1 * desc : aa > bb ? 1 * desc : 0;
         }
     });
 
-    // Update count
+    // Sort standalones independently (books sort key has no "books" axis)
+    filteredStandalones = [...filteredStandalones].sort((a, b) => {
+        if (sort === 'author') {
+            const aa = (a.author_sort || a.authors || '').toLowerCase();
+            const bb = (b.author_sort || b.authors || '').toLowerCase();
+            return aa < bb ? -1 * desc : aa > bb ? 1 * desc : 0;
+        } else if (sort === 'rating') {
+            const aa = a.rating ?? -1;
+            const bb = b.rating ?? -1;
+            return (aa - bb) * desc;
+        } else {
+            // title default (and 'books' sort falls back to title for standalones)
+            const aa = (a.title || '').toLowerCase();
+            const bb = (b.title || '').toLowerCase();
+            return aa < bb ? -1 * desc : aa > bb ? 1 * desc : 0;
+        }
+    });
+
+    // Update count: total tiles rendered
     const countEl = document.getElementById('book-count');
     if (countEl) {
-        countEl.textContent = `${filtered.length} series`;
+        const total = filteredSeries.length + filteredStandalones.length;
+        const sCount = filteredSeries.length;
+        const bCount = filteredStandalones.length;
+        countEl.textContent = bCount > 0
+            ? `${sCount} series, ${bCount} book${bCount !== 1 ? 's' : ''} (${total} total)`
+            : `${sCount} series`;
     }
 
     renderSeriesGrid(
         document.getElementById('series-grid-container')!,
-        filtered,
+        filteredSeries,
+        filteredStandalones,
     );
 }
 
 // Category sections rendered top-to-bottom; empty sections are skipped.
 const CATEGORY_ORDER = ['Religious', 'Fiction', 'Other'];
 
-function renderSeriesGrid(container: HTMLElement, series: any[]): void {
-    if (series.length === 0) {
+function renderSeriesGrid(
+    container: HTMLElement,
+    series: any[],
+    standalones: any[],
+): void {
+    if (series.length === 0 && standalones.length === 0) {
         container.innerHTML = `
             <div class="text-center text-muted py-5">
                 <i class="bi bi-collection" style="font-size: 3rem;"></i>
-                <p class="mt-2">No series found</p>
+                <p class="mt-2">No books or series found</p>
             </div>
         `;
         return;
     }
 
-    // Bucket by category. Series sort order from the filter bar is
-    // preserved within each bucket. Unknown categories fall to Other.
-    const buckets: Record<string, any[]> = {
+    // Bucket by category. Series first, then standalones — both kinds
+    // share the bucket so categories render together.
+    const seriesBuckets: Record<string, any[]> = {
+        Religious: [], Fiction: [], Other: [],
+    };
+    const standaloneBuckets: Record<string, any[]> = {
         Religious: [], Fiction: [], Other: [],
     };
     for (const s of series) {
-        const cat = buckets[s.category] ? s.category : 'Other';
-        buckets[cat].push(s);
+        const cat = seriesBuckets[s.category] ? s.category : 'Other';
+        seriesBuckets[cat].push(s);
+    }
+    for (const b of standalones) {
+        const cat = standaloneBuckets[b.category] ? b.category : 'Other';
+        standaloneBuckets[cat].push(b);
     }
 
     let html = '';
     for (const cat of CATEGORY_ORDER) {
-        const items = buckets[cat];
-        if (!items || items.length === 0) continue;
+        const seriesItems = seriesBuckets[cat] || [];
+        const bookItems = standaloneBuckets[cat] || [];
+        if (seriesItems.length === 0 && bookItems.length === 0) continue;
         html += `<h3 class="series-category-heading">${cat}</h3>`;
         html += '<div class="row g-3 mb-4">';
-        for (const s of items) {
-            html += renderSeriesCard(s);
-        }
+        for (const s of seriesItems) html += renderSeriesCard(s);
+        for (const b of bookItems) html += renderStandaloneCard(b);
         html += '</div>';
     }
     container.innerHTML = html;
 
-    // Attach click handlers
+    // Attach click handlers — series → series view, standalone → book detail.
     container.querySelectorAll('.series-card').forEach(card => {
         card.addEventListener('click', () => {
             const id = card.getAttribute('data-series-id');
             if (id) navigate(`#/series/${id}`);
+        });
+    });
+    container.querySelectorAll('.standalone-card').forEach(card => {
+        card.addEventListener('click', () => {
+            const id = card.getAttribute('data-book-id');
+            if (id) navigate(`#/book/${id}`);
         });
     });
 
@@ -314,6 +371,48 @@ function renderSeriesCard(s: any): string {
                     <div class="text-muted small mt-2">
                         Avg rating: ${avgRating}
                     </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderStandaloneCard(b: any): string {
+    // Status pill in the bottom-right of the cover.
+    const status = (b.reading_status || 'unread') as string;
+    const statusLabel = status === 'read'
+        ? 'Read'
+        : status === 'reading' ? 'Reading' : 'Unread';
+    const statusClass = status === 'read'
+        ? 'standalone-pill-read'
+        : status === 'reading'
+            ? 'standalone-pill-reading'
+            : 'standalone-pill-unread';
+
+    const authorHtml = b.authors
+        ? `<div class="text-muted small">${b.authors.split(',').map((a: string) => {
+            const trimmed = a.trim();
+            return `<span class="series-author-link" data-authors="${escapeHtml(trimmed)}">${escapeHtml(trimmed)}</span>`;
+        }).join(', ')}</div>`
+        : '';
+
+    const coverHtml = (b.cover_filename && b.cover_user_id != null)
+        ? `<div class="series-cover-wrap">
+               <img src="${api.coverUrl(b.cover_user_id, b.cover_filename, b.cover_updated_at)}" alt="${escapeHtml(b.title)}" class="series-cover-img" loading="lazy">
+               <span class="standalone-status-pill ${statusClass}">${statusLabel}</span>
+           </div>`
+        : `<div class="series-cover-wrap">
+               <div class="series-no-cover"><i class="bi bi-book"></i></div>
+               <span class="standalone-status-pill ${statusClass}">${statusLabel}</span>
+           </div>`;
+
+    return `
+        <div class="col-12 col-sm-6 col-md-4 col-lg-3">
+            <div class="card series-card standalone-card h-100" data-book-id="${b.standalone_book_id}">
+                ${coverHtml}
+                <div class="card-body">
+                    <h6 class="card-title mb-1">${escapeHtml(b.title || '')}</h6>
+                    ${authorHtml}
                 </div>
             </div>
         </div>

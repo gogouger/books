@@ -420,11 +420,33 @@ body::before {
 
 /* Cover banner on series cards — first book in the series */
 .series-cover-wrap {
+    position: relative;
     width: 100%;
     height: 180px;
     overflow: hidden;
     background-color: var(--bs-secondary-bg);
 }
+
+/* Status badge on standalone tiles (bottom-right of cover). */
+.standalone-status-pill {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #fff;
+    background-color: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+}
+
+.standalone-pill-read    { background-color: rgba(25, 135, 84, 0.85); }
+.standalone-pill-reading { background-color: rgba(200, 137, 59, 0.9); }
+.standalone-pill-unread  { background-color: rgba(33, 37, 41, 0.7); }
 
 .series-cover-img {
     width: 100%;
