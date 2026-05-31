@@ -28,11 +28,18 @@ def list_series(
     series = db.get_series_list(
         owner["id"], monitored=monitored
     )
+    standalones = db.get_standalone_books_for_overview(
+        owner["id"]
+    )
     is_owner = (
         viewer is not None
         and (viewer["user_id"] == owner["id"] or viewer.get("is_superuser"))
     )
-    return {"series": series, "is_owner": is_owner}
+    return {
+        "series": series,
+        "standalones": standalones,
+        "is_owner": is_owner,
+    }
 
 
 @router.get("/autocomplete")

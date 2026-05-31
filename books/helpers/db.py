@@ -1967,39 +1967,124 @@ _FICTION_TAGS = frozenset({
     "dystopia", "epic fantasy", "urban fantasy", "paranormal",
 })
 
+# Authors normalized to lowercase. Match is case-insensitive substring
+# on the (also lowercased) authors string. Single-token entries like
+# "tripp" match the last name anywhere in the author string; longer
+# entries pin a fuller form to avoid first-name false positives.
+_RELIGIOUS_AUTHORS = frozenset({
+    "paul david tripp", "tripp",
+    "d. martyn lloyd-jones", "martyn lloyd-jones", "lloyd-jones",
+    "francis chan",
+    "d.a. carson", "d. a. carson",
+    "dane c. ortlund", "dane ortlund",
+    "don richardson",
+    "edmund p. clowney", "edmund clowney",
+    "darrell l. bock", "darrell bock",
+    "craig a. blaising", "craig blaising",
+    "dan g. mccartney", "charles clayton",
+    "charles leiter",
+    "bruce olson",
+    "george muller", "george müller",
+    "brother andrew", "elizabeth sherrill", "john sherrill",
+    "tim keller", "timothy keller",
+    "john piper", "jen wilkin", "r.c. sproul", "rc sproul",
+    "ji packer", "j.i. packer",
+    "nt wright", "n.t. wright",
+    "john macarthur", "wayne grudem",
+    "charles spurgeon", "a.w. tozer", "aw tozer",
+    "dietrich bonhoeffer", "g.k. chesterton",
+    "henri nouwen", "eugene peterson", "dallas willard",
+    "richard foster", "philip yancey", "lee strobel",
+    "max lucado", "david platt", "matt chandler",
+    "andrew murray", "watchman nee", "elisabeth elliot",
+    "ravi zacharias", "alistair begg",
+})
+
+_RELIGIOUS_SERIES_NAME_HINTS = (
+    "bible", "gospel", "biblical", "theology", "christian",
+)
+
+# C.S. Lewis straddles fiction (Narnia) and theology. Title substrings
+# that mark a Lewis book as theology/religious.
+_LEWIS_RELIGIOUS_TITLE_HINTS = (
+    "mere christianity", "screwtape", "problem of pain",
+    "miracles", "great divorce", "abolition of man",
+)
+
+
+def _derive_category(
+    tags_blob: str | None = None,
+    authors: str | None = None,
+    series_name: str | None = None,
+    title: str | None = None,
+    *,
+    in_series: bool = False,
+) -> str:
+    """Classify a book or series into Religious / Fiction / Other.
+
+    Order (highest priority first):
+      1. Religious-author allowlist (with C.S. Lewis special case).
+      2. Religious series-name hint (e.g. "Bible Study").
+      3. Tag-based: Religious tags win over Fiction tags.
+      4. Series fallback -> Fiction (the user's series are all fiction).
+      5. Standalone fallback -> Other.
+    """
+    authors_l = (authors or "").lower()
+    series_l = (series_name or "").lower()
+    title_l = (title or "").lower()
+
+    # 1. Author allowlist.
+    if authors_l:
+        # C.S. Lewis special case: Narnia is Fiction; theology titles
+        # are Religious; otherwise default Lewis to Religious.
+        if (
+            "c.s. lewis" in authors_l
+            or "c. s. lewis" in authors_l
+            or "cs lewis" in authors_l
+        ):
+            if "narnia" in series_l:
+                return "Fiction"
+            for hint in _LEWIS_RELIGIOUS_TITLE_HINTS:
+                if hint in title_l:
+                    return "Religious"
+            return "Religious"
+        for a in _RELIGIOUS_AUTHORS:
+            if a in authors_l:
+                return "Religious"
+
+    # 2. Religious series name hints.
+    if series_l:
+        for hint in _RELIGIOUS_SERIES_NAME_HINTS:
+            if hint in series_l:
+                return "Religious"
+
+    # 3. Tag-based detection (legacy behavior).
+    if tags_blob:
+        try:
+            lower = tags_blob.lower()
+        except Exception:
+            lower = ""
+        if lower:
+            for t in _RELIGIOUS_TAGS:
+                if f'"{t}"' in lower:
+                    return "Religious"
+            for t in _FICTION_TAGS:
+                if f'"{t}"' in lower:
+                    return "Fiction"
+            for t in _RELIGIOUS_TAGS:
+                if t in lower:
+                    return "Religious"
+            for t in _FICTION_TAGS:
+                if t in lower:
+                    return "Fiction"
+
+    # 4/5. Fallback depends on whether this is a series or standalone.
+    return "Fiction" if in_series else "Other"
+
 
 def _categorize_series(tag_blob: str | None) -> str:
-    """Classify a series by its aggregated tags (case-insensitive).
-
-    Religious wins over Fiction; otherwise Other.
-    """
-    if not tag_blob:
-        return "Other"
-    seen: set[str] = set()
-    try:
-        # tag_blob is concatenated JSON arrays like
-        # '["theology"]||["bible","sermon"]'; just lowercase and scan.
-        lower = tag_blob.lower()
-    except Exception:
-        return "Other"
-    # Religious takes priority
-    for t in _RELIGIOUS_TAGS:
-        # Quote-wrapped match avoids partial-substring false positives
-        # (e.g. "religion" matching inside an unrelated longer tag).
-        if f'"{t}"' in lower:
-            return "Religious"
-    for t in _FICTION_TAGS:
-        if f'"{t}"' in lower:
-            return "Fiction"
-    # Loose fallback: also accept plain substrings (handles tags from
-    # importers that don't quote in JSON, e.g. comma-joined text).
-    for t in _RELIGIOUS_TAGS:
-        if t in lower:
-            return "Religious"
-    for t in _FICTION_TAGS:
-        if t in lower:
-            return "Fiction"
-    return "Other"
+    """Back-compat wrapper around _derive_category for series-only callers."""
+    return _derive_category(tags_blob=tag_blob, in_series=True)
 
 
 def get_series_list(
@@ -2177,11 +2262,64 @@ def get_series_list(
         s["progress_seq"] = ",".join(
             f"{v:.2f}" for v in trip[2]
         )
-        s["category"] = _categorize_series(
-            tag_blobs.get(s["series_link_id"])
+        s["category"] = _derive_category(
+            tags_blob=tag_blobs.get(s["series_link_id"]),
+            authors=s.get("authors"),
+            series_name=s.get("series"),
+            in_series=True,
         )
 
     return series_list
+
+
+def get_standalone_books_for_overview(
+    user_id: int,
+) -> list[dict]:
+    """Return one tile-shaped dict per standalone owned book.
+
+    A "standalone" is any book with `series_link_id IS NULL` (i.e. not
+    attached to any series). Used alongside `get_series_list` to power
+    the main library overview so non-series books still surface as
+    tiles bucketed by category.
+    """
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT id, user_id, title, authors, author_sort,
+                  cover_filename, cover_updated_at,
+                  rating, reading_status, is_owned, tags
+           FROM books
+           WHERE user_id = ?
+               AND series_link_id IS NULL
+               AND is_owned = 1
+           ORDER BY COALESCE(author_sort, authors, title)""",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+
+    out: list[dict] = []
+    for r in rows:
+        book = dict(r)
+        category = _derive_category(
+            tags_blob=book.get("tags"),
+            authors=book.get("authors"),
+            title=book.get("title"),
+            in_series=False,
+        )
+        out.append({
+            "standalone_book_id": book["id"],
+            "title": book["title"],
+            "authors": book.get("authors"),
+            "author_sort": book.get("author_sort"),
+            "category": category,
+            "cover_filename": book.get("cover_filename"),
+            "cover_updated_at": book.get("cover_updated_at"),
+            "cover_user_id": book["user_id"],
+            "rating": book.get("rating"),
+            "reading_status": book.get("reading_status"),
+            "is_owned": book.get("is_owned"),
+            "tags": book.get("tags"),
+        })
+    return out
 
 
 def get_filtered_series(
