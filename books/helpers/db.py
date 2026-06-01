@@ -241,6 +241,7 @@ def init_db() -> None:
     _migrate_review()
     _migrate_manual_category()
     _migrate_series_entries_cover_url()
+    _migrate_asin()
     log.info("Database initialized at %s", DB_PATH)
 
 
@@ -697,6 +698,29 @@ def _migrate_series_entries_cover_url() -> None:
     conn.execute(
         "ALTER TABLE series_entries ADD COLUMN cover_url TEXT"
     )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_asin() -> None:
+    """Add asin column to books (Amazon Standard Identification Number).
+
+    Royal Road / Kindle Unlimited / Audible titles often only have an
+    ASIN — no ISBN. Storing it separately lets us fall back to the
+    Amazon cover CDN when ISBN-based lookups dead-end.
+    """
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(books)"
+        ).fetchall()
+    ]
+    if "asin" in columns:
+        conn.close()
+        return
+    log.info("Adding asin column to books")
+    conn.execute("ALTER TABLE books ADD COLUMN asin TEXT")
     conn.commit()
     conn.close()
 
@@ -1793,7 +1817,7 @@ def update_book(
         "series", "series_index", "series_link_id",
         "description", "review",
         "cover_filename", "cover_updated_at",
-        "file_path", "epub_hash", "isbn", "goodreads_id",
+        "file_path", "epub_hash", "isbn", "asin", "goodreads_id",
         "tags", "date_finished", "published_date",
         "rating", "reading_status",
         "progress", "is_favorite", "is_owned",

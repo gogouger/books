@@ -37,6 +37,18 @@ OL_COVER = "https://covers.openlibrary.org/b/id/{cover_id}-L.jpg"
 GBOOKS = "https://www.googleapis.com/books/v1/volumes"
 ITUNES_SEARCH = "https://itunes.apple.com/search"
 
+# Amazon's image CDN serves cover art by ASIN. The CDN isn't a public
+# API — these URL patterns aren't documented and may break — so we try
+# them in fallback order and accept whichever returns a real JPEG.
+AMAZON_COVER_URLS = (
+    "https://images-na.ssl-images-amazon.com/images/P/{asin}.01.LZZZZZZZ.jpg",
+    "https://m.media-amazon.com/images/I/{asin}.jpg",
+    "https://images-na.ssl-images-amazon.com/images/P/{asin}.jpg",
+)
+# Min JPEG byte count to count as a real cover. Amazon's "no image"
+# fallback served on a bad ASIN is ~2-3 KB; real covers are 30 KB+.
+_AMAZON_COVER_MIN_BYTES = 5 * 1024
+
 # Title-similarity floor for Apple Books matches. Lower than 0.5 lets
 # in too many wrong matches (e.g. iTunes returns unrelated titles for
 # generic queries); 0.6 keeps it strict.
@@ -288,10 +300,50 @@ def _try_openlibrary_search(
     return cr.content
 
 
+def _try_amazon(
+    asin: str, client: httpx.Client,
+) -> bytes | None:
+    """Try the Amazon image CDN by ASIN.
+
+    Walks the documented-by-convention URL patterns in order until one
+    returns a 200 with a real JPEG > 5 KB. Sleeps 1s between hits to
+    stay polite — Amazon rate-limits aggressively if you hammer it.
+
+    Returns None on any error / 404 / undersized image. The caller
+    treats None as "fall through, no cover from this source".
+    """
+    if not asin:
+        return None
+    asin = asin.strip().upper()
+    for tpl in AMAZON_COVER_URLS:
+        url = tpl.format(asin=asin)
+        try:
+            r = client.get(url)
+        except Exception:
+            time.sleep(1.0)
+            continue
+        if r.status_code != 200:
+            time.sleep(1.0)
+            continue
+        body = r.content
+        if len(body) <= _AMAZON_COVER_MIN_BYTES:
+            time.sleep(1.0)
+            continue
+        if not body.startswith(b"\xff\xd8\xff"):
+            time.sleep(1.0)
+            continue
+        ctype = r.headers.get("content-type", "")
+        if not ctype.startswith("image"):
+            time.sleep(1.0)
+            continue
+        return body
+    return None
+
+
 def _missing_books_for(user_id: int) -> list[dict]:
     conn = db.get_db()
     rows = conn.execute(
-        """SELECT id, user_id, title, authors
+        """SELECT id, user_id, title, authors, asin
            FROM books
            WHERE user_id = ? AND cover_filename IS NULL""",
         (user_id,),
@@ -354,6 +406,7 @@ def main() -> None:
     total_filled_gb = 0
     total_filled_apple = 0
     total_filled_ol_search = 0
+    total_filled_amazon = 0
     total_processed = 0
     total_failed = 0
 
@@ -393,7 +446,7 @@ def main() -> None:
                     if cover:
                         source = "apple"
                 if not cover:
-                    # Final fallback: OpenLibrary /search.json with
+                    # Next fallback: OpenLibrary /search.json with
                     # title-similarity scoring (catches near-miss
                     # titles the first-hit OL lookup at step 1
                     # silently skipped).
@@ -403,6 +456,18 @@ def main() -> None:
                     )
                     if cover:
                         source = "openlibrary_search"
+
+                if not cover and book.get("asin"):
+                    # Last-resort: Amazon image CDN by ASIN. Royal
+                    # Road / KU / Audible titles often have no ISBN
+                    # but a valid ASIN, and the Amazon image servers
+                    # will hand back the cover if you know the ID.
+                    # Polite 1s pause before the first hit; the helper
+                    # sleeps 1s between its own URL attempts.
+                    time.sleep(1.0)
+                    cover = _try_amazon(book["asin"], client)
+                    if cover:
+                        source = "amazon"
 
                 if not cover:
                     total_failed += 1
@@ -437,6 +502,8 @@ def main() -> None:
                     total_filled_apple += 1
                 elif source == "openlibrary_search":
                     total_filled_ol_search += 1
+                elif source == "amazon":
+                    total_filled_amazon += 1
 
                 time.sleep(args.sleep)
 
@@ -446,6 +513,7 @@ def main() -> None:
     total_filled = (
         total_filled_ol + total_filled_gb
         + total_filled_apple + total_filled_ol_search
+        + total_filled_amazon
     )
     print(
         f"\nDone: processed {total_processed}, "
@@ -453,7 +521,8 @@ def main() -> None:
         f"{total_filled_ol} OpenLibrary, "
         f"{total_filled_gb} Google Books, "
         f"{total_filled_apple} Apple Books, "
-        f"{total_filled_ol_search} OL search), "
+        f"{total_filled_ol_search} OL search, "
+        f"{total_filled_amazon} Amazon), "
         f"{total_failed} unresolved."
     )
 
