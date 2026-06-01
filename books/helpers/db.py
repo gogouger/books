@@ -239,6 +239,7 @@ def init_db() -> None:
     _migrate_series_complete()
     _migrate_book_format()
     _migrate_review()
+    _migrate_manual_category()
     log.info("Database initialized at %s", DB_PATH)
 
 
@@ -645,6 +646,30 @@ def _migrate_review() -> None:
     log.info("Adding review column to books")
     conn.execute(
         "ALTER TABLE books ADD COLUMN review TEXT"
+    )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_manual_category() -> None:
+    """Add a manual_category column (owner override for the heuristic).
+
+    Values are kept text-free except via the API validator, which only
+    accepts NULL, 'Religious', or 'Fiction'.
+    """
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(books)"
+        ).fetchall()
+    ]
+    if "manual_category" in columns:
+        conn.close()
+        return
+    log.info("Adding manual_category column to books")
+    conn.execute(
+        "ALTER TABLE books ADD COLUMN manual_category TEXT"
     )
     conn.commit()
     conn.close()
@@ -1740,7 +1765,7 @@ def update_book(
         "tags", "date_finished", "published_date",
         "rating", "reading_status",
         "progress", "is_favorite", "is_owned",
-        "series_ignored",
+        "series_ignored", "manual_category",
     }
     filtered = {
         k: v for k, v in updates.items() if k in allowed
@@ -2013,6 +2038,7 @@ _LEWIS_RELIGIOUS_TITLE_HINTS = (
 
 
 def _derive_category(
+    manual_category: str | None = None,
     tags_blob: str | None = None,
     authors: str | None = None,
     series_name: str | None = None,
@@ -2023,6 +2049,7 @@ def _derive_category(
     """Classify a book or series into Religious / Fiction.
 
     Order (highest priority first):
+      0. Owner-supplied manual_category (if 'Religious' or 'Fiction').
       1. Religious-author allowlist (with C.S. Lewis special case).
       2. Religious series-name hint (e.g. "Bible Study").
       3. Tag-based: Religious tags win over Fiction tags.
@@ -2031,6 +2058,8 @@ def _derive_category(
          "Other" was just creating a confusing third bucket of fiction
          standalones the heuristics couldn't otherwise attribute).
     """
+    if manual_category in ("Religious", "Fiction"):
+        return manual_category
     authors_l = (authors or "").lower()
     series_l = (series_name or "").lower()
     title_l = (title or "").lower()
@@ -2086,7 +2115,11 @@ def _derive_category(
 
 def _categorize_series(tag_blob: str | None) -> str:
     """Back-compat wrapper around _derive_category for series-only callers."""
-    return _derive_category(tags_blob=tag_blob, in_series=True)
+    return _derive_category(
+        manual_category=None,
+        tags_blob=tag_blob,
+        in_series=True,
+    )
 
 
 def get_series_list(
@@ -2241,6 +2274,20 @@ def get_series_list(
            GROUP BY b.series_link_id""",
         (user_id,),
     ).fetchall()
+
+    # Manual category override per series: take any non-null value
+    # the owner may have set on one of the books (rare, but allowed).
+    manual_rows = conn.execute(
+        """SELECT b.series_link_id,
+                  MAX(b.manual_category) as manual_category
+           FROM books b
+           WHERE b.user_id = ?
+               AND b.series_link_id IS NOT NULL
+               AND b.series_ignored = 0
+               AND b.manual_category IS NOT NULL
+           GROUP BY b.series_link_id""",
+        (user_id,),
+    ).fetchall()
     conn.close()
 
     seqs: dict[int, tuple[list[str], list[str], list[float]]] = {}
@@ -2256,6 +2303,11 @@ def get_series_list(
         r["series_link_id"]: r["tag_blob"] or ""
         for r in tag_rows
     }
+    manual_overrides: dict[int, str] = {
+        r["series_link_id"]: r["manual_category"]
+        for r in manual_rows
+        if r["manual_category"]
+    }
 
     for s in series_list:
         trip = seqs.get(s["series_link_id"], ([], [], []))
@@ -2265,6 +2317,7 @@ def get_series_list(
             f"{v:.2f}" for v in trip[2]
         )
         s["category"] = _derive_category(
+            manual_category=manual_overrides.get(s["series_link_id"]),
             tags_blob=tag_blobs.get(s["series_link_id"]),
             authors=s.get("authors"),
             series_name=s.get("series"),
@@ -2288,7 +2341,8 @@ def get_standalone_books_for_overview(
     rows = conn.execute(
         """SELECT id, user_id, title, authors, author_sort,
                   cover_filename, cover_updated_at,
-                  rating, reading_status, is_owned, tags
+                  rating, reading_status, is_owned, tags,
+                  manual_category
            FROM books
            WHERE user_id = ?
                AND series_link_id IS NULL
@@ -2302,6 +2356,7 @@ def get_standalone_books_for_overview(
     for r in rows:
         book = dict(r)
         category = _derive_category(
+            manual_category=book.get("manual_category"),
             tags_blob=book.get("tags"),
             authors=book.get("authors"),
             title=book.get("title"),

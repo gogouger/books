@@ -56,6 +56,7 @@ class BookUpdate(BaseModel):
     progress: float | None = None
     is_favorite: bool | None = None
     is_owned: bool | None = None
+    manual_category: str | None = None
 
     @field_validator("rating")
     @classmethod
@@ -70,6 +71,19 @@ class BookUpdate(BaseModel):
         if v is not None and v not in ("unread", "reading", "read"):
             raise ValueError(
                 "reading_status must be 'unread', 'reading', or 'read'"
+            )
+        return v
+
+    @field_validator("manual_category")
+    @classmethod
+    def validate_manual_category(
+        cls, v: str | None,
+    ) -> str | None:
+        if v is None or v == "":
+            return None
+        if v not in ("Religious", "Fiction"):
+            raise ValueError(
+                "manual_category must be 'Religious', 'Fiction', or null"
             )
         return v
 

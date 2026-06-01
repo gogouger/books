@@ -140,6 +140,15 @@ function renderForm(
                 </div>
 
                 <div class="mb-3">
+                    <label for="edit-manual-category" class="form-label">Category</label>
+                    <select class="form-select" id="edit-manual-category">
+                        <option value=""${book.manual_category ? '' : ' selected'}>Auto (let the heuristic decide)</option>
+                        <option value="Fiction"${book.manual_category === 'Fiction' ? ' selected' : ''}>Fiction</option>
+                        <option value="Religious"${book.manual_category === 'Religious' ? ' selected' : ''}>Religious</option>
+                    </select>
+                </div>
+
+                <div class="mb-3">
                     <label for="edit-description" class="form-label">Description</label>
                     <textarea class="form-control" id="edit-description"
                               rows="5">${escapeHtml(book.description || '')}</textarea>
@@ -240,6 +249,7 @@ function renderForm(
         const publishedDate = (document.getElementById('edit-published-date') as HTMLInputElement).value.trim() || null;
         const dateFinished = (document.getElementById('edit-date-finished') as HTMLInputElement).value || null;
         const description = (document.getElementById('edit-description') as HTMLTextAreaElement).value.trim() || null;
+        const manualCategory = (document.getElementById('edit-manual-category') as HTMLSelectElement).value || null;
 
         const updates: Record<string, any> = {
             title,
@@ -253,6 +263,7 @@ function renderForm(
             rating: currentRating,
             is_favorite: currentFavorite,
             reading_status: currentStatus,
+            manual_category: manualCategory,
         };
 
         const saveBtn = document.getElementById('save-btn') as HTMLButtonElement;
