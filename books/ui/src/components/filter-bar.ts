@@ -1,4 +1,4 @@
-export type LibraryView = 'books-grouped' | 'series-cards' | 'books-flat';
+export type LibraryView = 'books-grouped' | 'books-flat';
 export type LibraryCategory = 'all' | 'Religious' | 'Fiction';
 
 export interface FilterState {
@@ -21,7 +21,6 @@ export interface CategoryOption { value: LibraryCategory; label: string }
 
 export const VIEW_OPTIONS: ViewOption[] = [
     { value: 'books-grouped', label: 'Books by series' },
-    { value: 'series-cards', label: 'Series cards' },
     { value: 'books-flat', label: 'Books (flat)' },
 ];
 

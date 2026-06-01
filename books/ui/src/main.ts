@@ -5,7 +5,6 @@ import { initThemeToggle } from './theme';
 import { renderLogin, updateNavbar } from './pages/login';
 import { renderLibrary, resetLibraryFilters } from './pages/library';
 import { renderBookDetail } from './pages/book-detail';
-import { resetSeriesFilters } from './pages/series-list';
 import { renderSeriesView } from './pages/series-view';
 import { renderSeriesEdit } from './pages/series-edit';
 import { renderAddBook } from './pages/add-book';
@@ -38,17 +37,14 @@ initThemeToggle();
         if (me) setUser(me);
     }
 
-    // Library is the default landing — flat list grouped by series
-    // (sort=series default, sea-green section headers). The series-tile
-    // overview is now a preset on the same page (view=series-cards).
+    // Library is the only browse page (was previously split with /series
+    // overview tiles; that got folded in, and now even the in-library
+    // series-cards mode is gone — books-grouped + books-flat is enough).
+    // /series/:id detail and /series/:id/edit still work for clicking
+    // into a specific series from a section header.
     setDefaultRoute((p) => renderLibrary(p));
     addRoute('/book/:id/edit', (p) => renderBookEdit(p));
     addRoute('/book/:id', (p) => renderBookDetail(p));
-    addRoute('/series', (p) => renderLibrary({
-        ...p,
-        view: 'series-cards',
-        category: p.category || 'all',
-    }));
     addRoute('/series/:id/edit', (p) => renderSeriesEdit(p));
     addRoute('/series/:id', (p) => renderSeriesView(p));
     addRoute('/library', (p) => renderLibrary(p));
@@ -58,15 +54,8 @@ initThemeToggle();
     updateNavbar();
     startRouter();
 
-    // Reset filters when clicking nav links directly
+    // Reset filters when clicking the Library nav link directly
     document.getElementById('nav-library')?.addEventListener('click', () => {
         resetLibraryFilters();
-    });
-    document.getElementById('nav-series')?.addEventListener('click', () => {
-        // Series link is now a preset on the library page — reset library
-        // state so the preset applies cleanly. Also reset the legacy
-        // series-list cache in case anything else still touches it.
-        resetLibraryFilters();
-        resetSeriesFilters();
     });
 })();

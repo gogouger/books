@@ -8,10 +8,6 @@ import {
     LibraryView,
     LibraryCategory,
 } from '../components/filter-bar';
-import {
-    renderSeriesGrid,
-    attachSeriesGridHandlers,
-} from './series-list';
 
 let currentState: FilterState = {
     q: '',
@@ -26,7 +22,7 @@ let currentState: FilterState = {
 const PAGE_SIZE = 60;
 let pendingAuthorFilter: string | null = null;
 
-// Infinite scroll + cache state (books views only — series-cards loads once).
+// Infinite scroll + cache state.
 let allBooks: any[] = [];
 let totalBooks = 0;
 let savedScrollY = 0;
@@ -36,10 +32,6 @@ let lastLoadedState: FilterState | null = null;
 let scrollListener: (() => void) | null = null;
 // When the user toggles ghost-entry overlay off (sticky across loads).
 let hideUnowned = false;
-
-// Series-cards view cache (separate from books cache).
-let cachedSeries: any[] | null = null;
-let cachedStandalones: any[] | null = null;
 
 const DEFAULT_STATE: FilterState = {
     q: '',
@@ -90,8 +82,6 @@ function statesMatch(a: FilterState, b: FilterState): boolean {
 function applyAuthorFilter(author: string): void {
     currentState.q = author;
     currentState.sort = 'title';
-    // Author filter only makes sense in a books view — drop out of cards.
-    if (currentState.view === 'series-cards') currentState.view = 'books-flat';
 
     const searchInput = document.getElementById('filter-search') as HTMLInputElement;
     if (searchInput) searchInput.value = author;
@@ -112,11 +102,10 @@ function resetAndReload(): void {
     renderShell();
 }
 
-// Apply view/category presets coming from the router (e.g. /series). Also
-// applies whatever the URL hash currently encodes so refresh works.
+// Apply view/category presets from the URL hash so refresh works.
 function applyPresetFromParams(params: Record<string, string>): void {
     const view = params.view;
-    if (view === 'books-grouped' || view === 'series-cards' || view === 'books-flat') {
+    if (view === 'books-grouped' || view === 'books-flat') {
         currentState.view = view;
         // Keep sort in sync with view so books-grouped uses series sort.
         if (view === 'books-grouped') currentState.sort = 'series';
@@ -152,7 +141,6 @@ export async function renderLibrary(params: Record<string, string> = {}): Promis
     if (pendingAuthorFilter) {
         currentState.q = pendingAuthorFilter;
         currentState.sort = 'title';
-        if (currentState.view === 'series-cards') currentState.view = 'books-flat';
         pendingAuthorFilter = null;
     }
 
@@ -160,30 +148,24 @@ export async function renderLibrary(params: Record<string, string> = {}): Promis
     renderShell();
 }
 
-// Render the page shell (filter bar + content host) and dispatch to the
-// right content renderer based on currentState.view.
+// Render the page shell (filter bar + content host) + the books grid.
 function renderShell(): void {
     const app = document.getElementById('app')!;
-    const isSeriesView = currentState.view === 'series-cards';
 
     app.innerHTML =
         filterBarHtml(currentState, {
             showView: true,
             showCategory: true,
         }) +
-        // "Hide unowned" toggle — only meaningful in books-grouped mode
-        // since other views don't request ghosts.
-        (isSeriesView
-            ? ''
-            : `<div class="mb-2 d-flex gap-3 align-items-center small">
-                <div class="form-check form-switch mb-0">
-                    <input class="form-check-input" type="checkbox"
-                           id="hide-unowned-toggle" ${hideUnowned ? 'checked' : ''}>
-                    <label class="form-check-label text-muted" for="hide-unowned-toggle">
-                        Hide unowned (ghost entries)
-                    </label>
-                </div>
-            </div>`) +
+        `<div class="mb-2 d-flex gap-3 align-items-center small">
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox"
+                       id="hide-unowned-toggle" ${hideUnowned ? 'checked' : ''}>
+                <label class="form-check-label text-muted" for="hide-unowned-toggle">
+                    Hide unowned (ghost entries)
+                </label>
+            </div>
+        </div>` +
         '<div id="library-content"></div>' +
         '<div id="scroll-sentinel"></div>';
 
@@ -219,12 +201,7 @@ function renderShell(): void {
     }
 
     setupScrollTracking();
-
-    if (isSeriesView) {
-        renderSeriesCardsView();
-    } else {
-        renderBooksView();
-    }
+    renderBooksView();
 }
 
 // === Books views (books-grouped + books-flat) ============================
@@ -402,7 +379,6 @@ async function loadMoreBooks(): Promise<void> {
 
 function setupInfiniteScroll(): void {
     if (observer) { observer.disconnect(); observer = null; }
-    if (currentState.view === 'series-cards') return;
     if (allBooks.length >= totalBooks) return;
 
     const sentinel = document.getElementById('scroll-sentinel');
@@ -417,108 +393,6 @@ function setupInfiniteScroll(): void {
         { rootMargin: '400px' }
     );
     observer.observe(sentinel);
-}
-
-// === Series-cards view ===================================================
-
-async function renderSeriesCardsView(): Promise<void> {
-    const username = getLibraryUsername()!;
-    const gridContainer = document.getElementById('library-content')!;
-    const countEl = document.getElementById('book-count');
-
-    if (!cachedSeries) {
-        gridContainer.innerHTML = `
-            <div class="loading-spinner">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-            </div>
-        `;
-        try {
-            const data = await api.getSeries(username, false);
-            cachedSeries = data.series || [];
-            cachedStandalones = data.standalones || [];
-        } catch (err: any) {
-            gridContainer.innerHTML = `
-                <div class="alert alert-danger">
-                    Failed to load series: ${err.message}
-                </div>
-            `;
-            return;
-        }
-    }
-
-    // Hide ongoing series in this view (matches /series page default).
-    let series = (cachedSeries || []).filter(s => s.series_complete !== 0);
-    let standalones = (cachedStandalones || []).slice();
-
-    // Apply category filter
-    const cat = currentState.category || 'all';
-    if (cat !== 'all') {
-        series = series.filter(s => s.category === cat);
-        standalones = standalones.filter(b => b.category === cat);
-    }
-
-    // Apply text search across name/author/title
-    if (currentState.q) {
-        const q = currentState.q.toLowerCase();
-        series = series.filter(s =>
-            s.series.toLowerCase().includes(q) ||
-            (s.authors && s.authors.toLowerCase().includes(q))
-        );
-        standalones = standalones.filter(b =>
-            (b.title && b.title.toLowerCase().includes(q)) ||
-            (b.authors && b.authors.toLowerCase().includes(q))
-        );
-    }
-
-    // Sort: respect the filter-bar sort selection where it makes sense.
-    const desc = currentState.order === 'desc' ? -1 : 1;
-    const sort = currentState.sort;
-    series = [...series].sort((a, b) => {
-        if (sort === 'author') {
-            const aa = (a.author_sort || '').toLowerCase();
-            const bb = (b.author_sort || '').toLowerCase();
-            return aa < bb ? -1 * desc : aa > bb ? 1 * desc : 0;
-        } else if (sort === 'rating') {
-            return ((a.avg_rating ?? -1) - (b.avg_rating ?? -1)) * desc;
-        } else {
-            const aa = a.series.toLowerCase();
-            const bb = b.series.toLowerCase();
-            return aa < bb ? -1 * desc : aa > bb ? 1 * desc : 0;
-        }
-    });
-    standalones = [...standalones].sort((a, b) => {
-        if (sort === 'author') {
-            const aa = (a.author_sort || a.authors || '').toLowerCase();
-            const bb = (b.author_sort || b.authors || '').toLowerCase();
-            return aa < bb ? -1 * desc : aa > bb ? 1 * desc : 0;
-        } else if (sort === 'rating') {
-            return ((a.rating ?? -1) - (b.rating ?? -1)) * desc;
-        } else {
-            const aa = (a.title || '').toLowerCase();
-            const bb = (b.title || '').toLowerCase();
-            return aa < bb ? -1 * desc : aa > bb ? 1 * desc : 0;
-        }
-    });
-
-    if (countEl) {
-        const s = series.length;
-        const b = standalones.length;
-        const total = s + b;
-        countEl.textContent = b > 0
-            ? `${s} series, ${b} book${b !== 1 ? 's' : ''} (${total} total)`
-            : `${s} series`;
-    }
-
-    // Headers only when showing all categories; specific category collapses
-    // to a single flat grid.
-    renderSeriesGrid(gridContainer, series, standalones, {
-        showCategoryHeaders: cat === 'all',
-    });
-    attachSeriesGridHandlers(gridContainer);
-
-    lastLoadedState = { ...currentState };
 }
 
 function setupScrollTracking(): void {
