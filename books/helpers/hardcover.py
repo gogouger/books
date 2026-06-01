@@ -438,17 +438,61 @@ def compute_data_hash(raw_entries: list[dict]) -> str:
     ).hexdigest()
 
 
+# Distinctive non-English words / particles that catch all-ASCII titles
+# in Romance languages. The 0.8 ASCII-ratio check used to let entries
+# like "Os Arquivos do Semideus" (Portuguese, 100% ASCII) slip through.
+_NON_ENGLISH_TOKENS = frozenset({
+    # Portuguese
+    "os", "do", "da", "dos", "das", "semideus", "arquivos",
+    # Spanish
+    "el", "los", "las", "una", "uno",
+    # French
+    "des", "du", "le", "les", "communauté", "sœurs",
+    # German
+    "der", "die", "das", "und", "von", "ein", "eine",
+    # Italian
+    "lo", "gli", "il", "della", "delle", "dei",
+    # Polish (mostly ASCII)
+    "diuny", "łowcy", "czerwie",
+    # Catalan
+    "fills", "boira", "pou", "ascensió", "heroi", "eternitat",
+    # Turkish
+    "kahramanları", "melez", "günlükleri", "olimpos",
+})
+
+
 def _is_likely_english(title: str) -> bool:
     """Check if a title is likely English/Latin-script.
 
-    Returns True if more than 80% of characters are basic
-    ASCII. Titles in Cyrillic, CJK, Arabic, Hebrew, etc.
-    will return False.
+    Two-step check: (1) reject any title containing non-Latin letter
+    characters outside basic ASCII (catches Turkish ı, French ç,
+    Polish Ł, etc., but allows common punctuation like em-dashes and
+    smart quotes); (2) for all-ASCII titles, check for distinctive
+    non-English particles in the token list — catches things like
+    "Os Arquivos do Semideus" that the old 0.8 ASCII-ratio threshold
+    missed.
     """
     if not title:
         return False
-    ascii_count = sum(1 for c in title if ord(c) < 128)
-    return ascii_count / len(title) > 0.8
+    # Allow basic ASCII plus common typographic punctuation.
+    _PUNCT_OK = {
+        0x2013, 0x2014,  # en/em dash
+        0x2018, 0x2019,  # smart single quotes
+        0x201C, 0x201D,  # smart double quotes
+        0x2026,          # ellipsis
+        0x00A0,          # non-breaking space
+    }
+    for c in title:
+        cp = ord(c)
+        if cp > 127 and cp not in _PUNCT_OK:
+            return False
+    # All-ASCII title: check for non-English stopwords as a tiebreaker.
+    words = re.findall(r"[a-zA-Z]+", title.lower())
+    non_en_hits = sum(1 for w in words if w in _NON_ENGLISH_TOKENS)
+    # Two distinctive non-English tokens (e.g. "Os" + "do") strongly
+    # signals a foreign title; one alone is too risky (English uses
+    # some of these too — e.g. "Le" in author names).
+    return non_en_hits < 2
 
 
 _EDITORIAL_VARIANT_RE = re.compile(
@@ -494,6 +538,15 @@ def dedup_series_books(raw_entries: list[dict]) -> list[dict]:
 
     Returns list of {position, title, author, hardcover_book_id}.
     """
+    # Pre-pass: if ANY entry is English, drop the non-English ones
+    # entirely. Otherwise we'd keep foreign-language duplicates at
+    # fractional positions (e.g. "Os Arquivos do Semideus" PT at 4.5
+    # while the English "Demigod Files" is at 3.5) which renders as
+    # bogus ghost entries the user has no way to acquire.
+    any_english = any(
+        _is_likely_english(e.get("title", "")) for e in raw_entries
+    )
+
     by_position: dict[float, dict] = {}
     for entry in raw_entries:
         if entry.get("compilation"):
@@ -503,6 +556,8 @@ def dedup_series_books(raw_entries: list[dict]) -> list[dict]:
             continue
         if _is_editorial_variant(entry.get("title", "")):
             continue
+        if any_english and not _is_likely_english(entry.get("title", "")):
+            continue  # drop foreign-language duplicates
 
         existing = by_position.get(pos)
         if existing is None:
