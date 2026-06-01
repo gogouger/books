@@ -784,3 +784,80 @@ body::before {
 .book-card:hover { box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 18%, transparent); }
 .filter-bar, .detail-panel { background: var(--panel-bg); border: 1px solid var(--line2); box-shadow: none; }
 .book-detail .cover-large { box-shadow: 0 4px 15px rgba(0, 0, 0, .18); }
+
+/* ============================================================
+   Mobile pass — ≤575.98px
+   Goals: 2-col series grid (handled in TS), stacked book detail,
+   filter bar that wraps, cover that downscales, no horizontal
+   scroll, tap targets ≥44px.
+   ============================================================ */
+@media (max-width: 575.98px) {
+    /* Series cover banner — drop height so 2-col grid feels balanced. */
+    .series-cover-wrap { height: 140px; }
+
+    /* Card body padding — a touch tighter so two-up reads neatly. */
+    .series-card .card-body { padding: 0.5rem 0.6rem; }
+    .series-card .card-title { font-size: 0.85rem; }
+
+    /* Segmented progress bar inside series card: never overflow.
+       (it's already flex with min-width:4px per segment — but with
+       many books in a series, 12+ segments in a 160px card crowd.) */
+    .series-segments { flex-wrap: wrap; height: auto; gap: 2px; }
+    .series-segment { min-width: 6px; height: 10px; }
+
+    /* Book detail — stack cover above metadata, downscale cover. */
+    .book-detail > .row { --bs-gutter-x: 0; row-gap: 1rem; }
+    .book-detail > .row > .col-auto { flex: 0 0 100%; max-width: 100%; }
+    .book-detail .cover-large,
+    .book-detail .no-cover-large,
+    .book-detail .cover-edit-wrap {
+        width: 100%;
+        max-width: 220px;
+        height: auto;
+        aspect-ratio: var(--cover-ratio);
+        margin: 0 auto;
+    }
+    .book-detail .no-cover-large { font-size: 3.5rem; }
+    /* Center the cover block when it's stacked above text. */
+    .book-detail > .row > .col-auto { text-align: center; }
+
+    /* Detail rating row tightens up so stars + heart fit comfortably. */
+    .detail-rating-row { gap: 1em; }
+    .detail-rating-row .rating-stars,
+    .detail-rating-row .favorite-btn { font-size: 1.5rem; }
+
+    /* Filter bar — let every col wrap to its own row. The default
+       `col-auto` keeps its content width which crowds at 375px. */
+    .filter-bar .row > [class*="col-"] { flex: 0 0 auto; }
+    .filter-bar .col-auto.position-relative { flex: 1 1 100%; }
+    .filter-bar .col-auto:not(.position-relative) { flex: 1 1 auto; }
+    .filter-bar #filter-search { width: 100%; }
+    .filter-bar .form-select,
+    .filter-bar .form-control { font-size: 16px; } /* avoid iOS focus-zoom */
+    /* The pagination count drops below filters. */
+    .filter-bar .col-auto.text-end { flex: 0 0 100%; text-align: left !important; }
+
+    /* Book-edit — two-col inputs (ISBN/Published, Series/Series#) stack. */
+    .book-detail .row.mb-3 > .col,
+    .book-detail .row.mb-3 > .col-auto { flex: 0 0 100%; max-width: 100%; }
+    .book-detail .row.mb-3 > .col-auto[style*="width"] { width: 100% !important; }
+    .book-detail .row.mb-3 { row-gap: 0.75rem; }
+
+    /* Form controls — 16px to avoid iOS zoom-on-focus on textareas/inputs. */
+    .book-detail .form-control,
+    .book-detail textarea.form-control { font-size: 16px; }
+
+    /* Action button rows — the "Edit | Refresh Meta" / "Kindle | Kobo"
+       d-flex rows wrap at xs so labels never get truncated. */
+    .book-detail .detail-panel .d-flex { flex-wrap: wrap; gap: 0.5rem; }
+
+    /* Series row carousel cards — already h-scroll, but trim the size. */
+    .series-row-card,
+    .series-row-cover,
+    .series-row-no-cover { width: 80px; }
+    .series-row-cover,
+    .series-row-no-cover { height: 120px; }
+
+    /* Make all .btn-sm comfortably tappable. */
+    .book-detail .btn-sm { padding: 0.4rem 0.7rem; }
+}

@@ -357,7 +357,7 @@ function renderSeriesCard(s: any): string {
         : `<div class="series-cover-wrap"><div class="series-no-cover"><i class="bi bi-book"></i></div></div>`;
 
     return `
-        <div class="col-12 col-sm-6 col-md-4 col-lg-3">
+        <div class="col-6 col-sm-6 col-md-4 col-lg-3">
             <div class="card series-card${completionClass}${monitoredClass}${ongoingClass} h-100" data-series-id="${s.series_link_id}">
                 ${coverHtml}
                 <div class="card-body">
@@ -407,7 +407,7 @@ function renderStandaloneCard(b: any): string {
            </div>`;
 
     return `
-        <div class="col-12 col-sm-6 col-md-4 col-lg-3">
+        <div class="col-6 col-sm-6 col-md-4 col-lg-3">
             <div class="card series-card standalone-card h-100" data-book-id="${b.standalone_book_id}">
                 ${coverHtml}
                 <div class="card-body">
