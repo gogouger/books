@@ -1845,21 +1845,22 @@ def archive_book(
 
 
 # Effective status SQL expression: uses user override if present,
-# otherwise defaults based on whether position is integer.
-_EFFECTIVE_STATUS = """COALESCE(ues.status,
-    CASE WHEN se.position = CAST(se.position AS INTEGER)
-    THEN 'linked' ELSE 'ignored' END)"""
+# otherwise defaults to 'linked' for every entry. The user explicitly
+# wants novellas + supplementary entries (.5 positions like Edgedancer,
+# Secret History, Backup, etc.) counted toward the series so they
+# appear as ghosts when not owned. Anything truly noisy can still be
+# manually flipped to 'ignored' per-entry via the series-edit page.
+_EFFECTIVE_STATUS = "COALESCE(ues.status, 'linked')"
 
 
 def _compute_default_status(position: float) -> str:
-    """Return default entry status based on position.
+    """Return default entry status — 'linked' for every position.
 
-    Integer positions default to 'linked' (shown).
-    Decimal positions default to 'ignored' (hidden).
+    See the comment on _EFFECTIVE_STATUS for the rationale (novellas
+    should count by default; user can flip individual entries to
+    'ignored' via the series-edit page).
     """
-    if position == int(position):
-        return "linked"
-    return "ignored"
+    return "linked"
 
 
 def get_user_series(
