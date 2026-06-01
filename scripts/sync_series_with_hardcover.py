@@ -122,6 +122,9 @@ async def refresh_stage(
             except ValueError:
                 stale.append(r)
                 continue
+            # Legacy rows may store naive timestamps — assume UTC.
+            if checked.tzinfo is None:
+                checked = checked.replace(tzinfo=timezone.utc)
             if checked >= cutoff:
                 fresh.append(r)
             else:
