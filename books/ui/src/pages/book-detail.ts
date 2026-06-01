@@ -122,10 +122,24 @@ function buildKeywordSearch(title: string, authors: string): string {
 function renderBook(app: HTMLElement, book: any, username: string): void {
     const isOwner: boolean = book.is_owner;
 
-    const coverHtml = book.cover_filename
+    const coverInner = book.cover_filename
         ? `<img src="${api.coverUrl(book.user_id, book.cover_filename, book.cover_updated_at)}"
-               alt="${escapeHtml(book.title)}" class="cover-large">`
-        : `<div class="no-cover-large"><i class="bi bi-book"></i></div>`;
+               alt="${escapeHtml(book.title)}" class="cover-large" id="cover-image">`
+        : `<div class="no-cover-large" id="cover-image"><i class="bi bi-book"></i></div>`;
+    const coverHtml = isOwner
+        ? `<div class="cover-edit-wrap" id="cover-edit-wrap">
+               ${coverInner}
+               <div class="cover-drop" id="cover-drop">
+                   <div class="cover-drop-msg">
+                       <i class="bi bi-cloud-arrow-up"></i>
+                       <div>Drop cover here<br>or click to choose</div>
+                   </div>
+               </div>
+               <input type="file" id="cover-file-input"
+                      accept="image/jpeg,image/png,image/webp"
+                      hidden>
+           </div>`
+        : coverInner;
 
     const seriesHtml = book.series && book.series_link_id
         ? `<div class="text-muted mb-2">
@@ -352,6 +366,8 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
     // Only attach edit handlers if owner
     if (!isOwner) return;
 
+    setupCoverUpload(book, username);
+
     attachRatingHandler(
         document.getElementById('rating-container')!,
         async (rating) => {
@@ -512,6 +528,107 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
         });
     }
 
+}
+
+function setupCoverUpload(book: any, username: string): void {
+    const wrap = document.getElementById('cover-edit-wrap');
+    const drop = document.getElementById('cover-drop');
+    const input = document.getElementById('cover-file-input') as HTMLInputElement | null;
+    if (!wrap || !drop || !input) return;
+
+    let dragDepth = 0;
+
+    const setActive = (on: boolean) => {
+        drop.classList.toggle('drop-active', on);
+    };
+
+    const upload = async (file: File) => {
+        if (!file) return;
+        const okTypes = ['image/jpeg', 'image/png', 'image/webp'];
+        if (!okTypes.includes(file.type)) {
+            showAlert('Use a JPEG, PNG, or WebP image', 'danger');
+            return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            showAlert('Image too large (>5MB)', 'danger');
+            return;
+        }
+        drop.classList.add('uploading');
+        try {
+            const res = await api.uploadCover(username, book.id, file);
+            book.cover_filename = res.cover_filename;
+            book.cover_updated_at = res.cover_updated_at;
+            const newSrc = api.coverUrl(
+                book.user_id,
+                book.cover_filename,
+                book.cover_updated_at,
+            );
+            // Swap the placeholder div for an <img> if there was no cover.
+            const img = document.getElementById('cover-image');
+            if (img && img.tagName === 'IMG') {
+                (img as HTMLImageElement).src = newSrc;
+            } else if (img) {
+                const newImg = document.createElement('img');
+                newImg.src = newSrc;
+                newImg.alt = book.title;
+                newImg.id = 'cover-image';
+                newImg.className = 'cover-large';
+                img.replaceWith(newImg);
+            }
+            updateCachedBook(book.id, {
+                cover_filename: book.cover_filename,
+                cover_updated_at: book.cover_updated_at,
+            });
+            invalidateSeriesCache();
+            showAlert('Cover updated', 'success');
+        } catch (err: any) {
+            showAlert(err.message || 'Upload failed', 'danger');
+        } finally {
+            drop.classList.remove('uploading');
+            setActive(false);
+            dragDepth = 0;
+            input.value = '';
+        }
+    };
+
+    drop.addEventListener('click', () => input.click());
+    input.addEventListener('change', () => {
+        const f = input.files?.[0];
+        if (f) upload(f);
+    });
+
+    // Show overlay while dragging anywhere over the page (more discoverable).
+    const onDragEnter = (e: DragEvent) => {
+        if (!e.dataTransfer || !e.dataTransfer.types.includes('Files')) return;
+        dragDepth += 1;
+        setActive(true);
+    };
+    const onDragLeave = () => {
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (dragDepth === 0) setActive(false);
+    };
+    const onDragOver = (e: DragEvent) => {
+        if (!e.dataTransfer || !e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+    };
+    const onDrop = (e: DragEvent) => {
+        e.preventDefault();
+        dragDepth = 0;
+        const target = e.target as HTMLElement;
+        // Only handle drops that land on the cover area.
+        if (!wrap.contains(target)) {
+            setActive(false);
+            return;
+        }
+        const f = e.dataTransfer?.files?.[0];
+        setActive(false);
+        if (f) upload(f);
+    };
+
+    window.addEventListener('dragenter', onDragEnter);
+    window.addEventListener('dragleave', onDragLeave);
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('drop', onDrop);
 }
 
 function showAlert(message: string, type: string): void {

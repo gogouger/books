@@ -1529,6 +1529,102 @@ async def cover_from_url(
     return {"cover_filename": cover_filename}
 
 
+_ALLOWED_COVER_MIME = {"image/jpeg", "image/png", "image/webp"}
+
+
+@router.post("/books/{book_id}/cover")
+async def upload_cover(
+    book_id: int,
+    file: UploadFile,
+    payload: require_owner,
+) -> dict:
+    """Owner-only manual cover upload.
+
+    Accepts JPEG, PNG, or WebP up to 5 MB. PNG/WebP are converted to
+    JPEG to match the on-disk filename convention (`<book_id>.jpg`).
+    """
+    user_id = payload["user_id"]
+    book = db.get_book(book_id, user_id)
+    if book is None:
+        raise HTTPException(
+            status_code=404, detail="Book not found"
+        )
+
+    content_type = (file.content_type or "").lower()
+    if content_type not in _ALLOWED_COVER_MIME:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Unsupported image type "
+                "(use JPEG, PNG, or WebP)"
+            ),
+        )
+
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail="Image too large (>5MB)",
+        )
+    if not content:
+        raise HTTPException(
+            status_code=400, detail="Empty file",
+        )
+
+    # Normalize to JPEG via Pillow so the on-disk filename
+    # convention (`<book_id>.jpg`) holds regardless of upload format.
+    from io import BytesIO
+
+    try:
+        from PIL import Image
+    except ImportError:  # pragma: no cover
+        # If Pillow is unavailable for any reason, fall back to
+        # writing JPEGs verbatim (PNG/WebP would already be rejected
+        # above if normalization is required).
+        if content_type != "image/jpeg":
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Image normalization unavailable "
+                    "on this server"
+                ),
+            )
+        jpeg_bytes = content
+    else:
+        try:
+            img = Image.open(BytesIO(content))
+            img.load()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid image: {exc}",
+            ) from exc
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=88, optimize=True)
+        jpeg_bytes = buf.getvalue()
+
+    user_covers = DATA_DIR / "covers" / str(user_id)
+    user_covers.mkdir(parents=True, exist_ok=True)
+    cover_path = user_covers / f"{book_id}.jpg"
+    cover_path.write_bytes(jpeg_bytes)
+
+    now = datetime.now(timezone.utc).isoformat()
+    cover_filename = f"{book_id}.jpg"
+    db.update_book(
+        book_id, user_id,
+        {
+            "cover_filename": cover_filename,
+            "cover_updated_at": now,
+        },
+    )
+    return {
+        "cover_filename": cover_filename,
+        "cover_updated_at": now,
+    }
+
+
 async def _link_series_background(
     user_id: int, series_link_id: int
 ) -> None:

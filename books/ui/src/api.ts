@@ -179,6 +179,19 @@ export const api = {
         });
     },
 
+    async uploadCover(
+        username: string,
+        bookId: number,
+        file: File,
+    ): Promise<any> {
+        const formData = new FormData();
+        formData.append('file', file);
+        return apiFetch(`/${username}/books/${bookId}/cover`, {
+            method: 'POST',
+            body: formData,
+        });
+    },
+
     async previewMetadata(username: string, file: File): Promise<any> {
         const formData = new FormData();
         formData.append('file', file);

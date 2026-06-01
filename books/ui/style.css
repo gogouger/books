@@ -364,6 +364,58 @@ body::before {
     font-size: 5rem;
 }
 
+/* Owner-only cover upload overlay (drag/drop + click-to-pick). */
+.book-detail .cover-edit-wrap {
+    position: relative;
+    width: var(--cover-width-lg);
+    height: var(--cover-height-lg);
+    cursor: pointer;
+}
+
+.book-detail .cover-drop {
+    position: absolute;
+    inset: 0;
+    border-radius: 8px;
+    background: rgba(251, 250, 244, 0.85);
+    color: var(--bs-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-size: 0.9rem;
+    opacity: 0;
+    transition: opacity 0.15s ease, background 0.15s ease;
+    pointer-events: none;
+    border: 2px dashed transparent;
+}
+
+.book-detail .cover-edit-wrap:hover .cover-drop,
+.book-detail .cover-drop.drop-active {
+    opacity: 1;
+    pointer-events: auto;
+    border-color: var(--bs-primary);
+}
+
+.book-detail .cover-drop.drop-active {
+    background: rgba(251, 250, 244, 0.95);
+}
+
+.book-detail .cover-drop.uploading {
+    opacity: 1;
+    pointer-events: auto;
+    border-color: var(--bs-primary);
+}
+
+.book-detail .cover-drop-msg {
+    padding: 0.5rem;
+}
+
+.book-detail .cover-drop-msg i {
+    font-size: 1.5rem;
+    display: block;
+    margin-bottom: 0.25rem;
+}
+
 /* Detail panel (elevated box for controls) */
 .detail-panel {
     background: var(--panel-bg);
