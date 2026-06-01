@@ -206,6 +206,115 @@ def update_series(
     return {"success": True}
 
 
+class EntryCreate(BaseModel):
+    title: str
+    position: float
+    author: str | None = None
+
+
+class EntryFieldsUpdate(BaseModel):
+    title: str | None = None
+    position: float | None = None
+    author: str | None = None
+
+
+@router.post("/{series_link_id}/entries")
+def add_series_entry(
+    series_link_id: int,
+    payload: EntryCreate,
+    auth: require_owner,
+) -> dict:
+    """Manually add a ghost entry to a series.
+
+    Owner-only — the route is gated on `require_owner` (which already
+    enforces the auth'd user matches the {username} path), and we
+    additionally verify a user_series subscription exists.
+    """
+    user_id = auth["user_id"]
+    us = db.get_user_series(user_id, series_link_id)
+    if not us:
+        raise HTTPException(
+            status_code=404, detail="Series not found"
+        )
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(
+            status_code=400, detail="Title is required"
+        )
+    author = payload.author.strip() if payload.author else None
+    entry_id = db.insert_series_entry(
+        series_link_id, title, payload.position, author or None,
+    )
+    return {
+        "entry_id": entry_id,
+        "series_link_id": series_link_id,
+        "title": title,
+        "position": payload.position,
+        "author": author,
+    }
+
+
+@router.patch("/entries/{entry_id}")
+def patch_series_entry(
+    entry_id: int,
+    payload: EntryFieldsUpdate,
+    auth: require_owner,
+) -> dict:
+    """Edit a ghost entry's title/position/author.
+
+    Owner-only. Validates the entry belongs to a series the user has a
+    subscription to before mutating.
+    """
+    user_id = auth["user_id"]
+    entry = db.get_series_entry_by_id(entry_id)
+    if not entry:
+        raise HTTPException(
+            status_code=404, detail="Entry not found"
+        )
+    us = db.get_user_series(user_id, entry["series_link_id"])
+    if not us:
+        raise HTTPException(
+            status_code=404, detail="Series not found"
+        )
+    fields: dict = {}
+    if payload.title is not None:
+        title = payload.title.strip()
+        if not title:
+            raise HTTPException(
+                status_code=400, detail="Title cannot be empty"
+            )
+        fields["title"] = title
+    if payload.position is not None:
+        fields["position"] = payload.position
+    if payload.author is not None:
+        # Empty string clears the author -> NULL.
+        a = payload.author.strip()
+        fields["author"] = a or None
+    changed = db.update_series_entry_fields(entry_id, **fields)
+    return {"success": True, "changed": changed}
+
+
+@router.delete("/entries/{entry_id}")
+def remove_series_entry(
+    entry_id: int,
+    auth: require_owner,
+) -> dict:
+    """Delete a ghost entry. user_entry_status follows via CASCADE."""
+    user_id = auth["user_id"]
+    entry = db.get_series_entry_by_id(entry_id)
+    if not entry:
+        raise HTTPException(
+            status_code=404, detail="Entry not found"
+        )
+    us = db.get_user_series(user_id, entry["series_link_id"])
+    if not us:
+        raise HTTPException(
+            status_code=404, detail="Series not found"
+        )
+    db.delete_series_entry(entry_id)
+    return {"success": True}
+
+
 @router.post("/{series_link_id}/refresh")
 async def refresh_series(
     series_link_id: int,

@@ -3460,6 +3460,128 @@ def update_series_entry(
     conn.close()
 
 
+def get_series_entry_by_id(entry_id: int) -> dict | None:
+    """Fetch a single series_entries row by id."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM series_entries WHERE id = ?",
+        (entry_id,),
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return dict(row)
+
+
+def insert_series_entry(
+    series_link_id: int,
+    title: str,
+    position: float,
+    author: str | None = None,
+) -> int:
+    """Insert a manual ghost entry into series_entries.
+
+    Used by the owner-only "add ghost entry" UI on series-edit when a
+    book belongs to a series that Hardcover doesn't catalog yet (e.g.
+    announced future books, niche Royal Road titles).
+
+    Returns the new entry id.
+    """
+    conn = get_db()
+    cursor = conn.execute(
+        """INSERT INTO series_entries
+           (series_link_id, position, title, author,
+            hardcover_book_id)
+           VALUES (?, ?, ?, ?, NULL)""",
+        (series_link_id, position, title, author),
+    )
+    new_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return new_id
+
+
+_UNSET: object = object()
+
+
+def update_series_entry_fields(
+    entry_id: int,
+    *,
+    title: str | None = None,
+    position: float | None = None,
+    author: object = _UNSET,
+) -> bool:
+    """Update a series_entries row's mutable fields.
+
+    Any of title/position/author may be omitted; only provided fields
+    are written. Pass `author=None` to explicitly clear the field;
+    omit it entirely to leave as-is. Unlike update_series_entry (which
+    mixes position + per-user status), this is a thin global field
+    update for the ghost-entry edit UI. Returns True if a row was
+    updated.
+    """
+    sets: list[str] = []
+    values: list = []
+    if title is not None:
+        sets.append("title = ?")
+        values.append(title)
+    if position is not None:
+        sets.append("position = ?")
+        values.append(position)
+    if author is not _UNSET:
+        sets.append("author = ?")
+        values.append(author)
+    if not sets:
+        return False
+
+    values.append(entry_id)
+    conn = get_db()
+
+    # If position changes, sync any books at the old position so the
+    # entry-to-book join continues to match.
+    if position is not None:
+        old = conn.execute(
+            """SELECT position, series_link_id
+               FROM series_entries WHERE id = ?""",
+            (entry_id,),
+        ).fetchone()
+        if old and old["position"] != position:
+            conn.execute(
+                """UPDATE books SET series_index = ?
+                   WHERE series_link_id = ?
+                       AND series_index = ?""",
+                (position, old["series_link_id"],
+                 old["position"]),
+            )
+
+    cursor = conn.execute(
+        f"UPDATE series_entries SET {', '.join(sets)}"
+        f" WHERE id = ?",
+        values,
+    )
+    conn.commit()
+    changed = cursor.rowcount > 0
+    conn.close()
+    return changed
+
+
+def delete_series_entry(entry_id: int) -> bool:
+    """Delete a series_entries row.
+
+    `user_entry_status` has ON DELETE CASCADE, so per-user overrides
+    follow. Returns True if a row was deleted.
+    """
+    conn = get_db()
+    cursor = conn.execute(
+        "DELETE FROM series_entries WHERE id = ?",
+        (entry_id,),
+    )
+    conn.commit()
+    changed = cursor.rowcount > 0
+    conn.close()
+    return changed
+
+
 # --- KOReader sync queries ---
 
 
