@@ -4,6 +4,7 @@
 For each book with `cover_filename IS NULL`, try in order:
   1. Open Library search by title + author (cover_i -> covers.openlibrary.org)
   2. Google Books search by title + author (volumeInfo.imageLinks)
+  3. Apple Books / iTunes search (artworkUrl100 upscaled to 1500x1500)
 
 On success, writes the JPEG to DATA_DIR/covers/<user_id>/<book_id>.jpg
 and updates `cover_filename` + `cover_updated_at` in the DB.
@@ -31,6 +32,12 @@ USER_AGENT = "meron-books-bot/1.0 gordon@ggouger.com"
 OL_SEARCH = "https://openlibrary.org/search.json"
 OL_COVER = "https://covers.openlibrary.org/b/id/{cover_id}-L.jpg"
 GBOOKS = "https://www.googleapis.com/books/v1/volumes"
+ITUNES_SEARCH = "https://itunes.apple.com/search"
+
+# Title-similarity floor for Apple Books matches. Lower than 0.5 lets
+# in too many wrong matches (e.g. iTunes returns unrelated titles for
+# generic queries); 0.6 keeps it strict.
+_APPLE_TITLE_THRESHOLD = 0.6
 
 
 def _first_author(authors: str) -> str:
@@ -75,6 +82,71 @@ def _try_openlibrary(
             and cr.headers.get("content-type", "").startswith("image")
         ):
             return cr.content
+    except Exception:
+        return None
+    return None
+
+
+def _norm_title(s: str) -> str:
+    """Lowercase and strip non-alnum for fuzzy comparisons."""
+    return "".join(ch for ch in s.lower() if ch.isalnum() or ch.isspace()).strip()
+
+
+def _title_similarity(a: str, b: str) -> float:
+    """Cheap token-overlap ratio. 1.0 == identical, 0.0 == disjoint."""
+    aa, bb = _norm_title(a), _norm_title(b)
+    if not aa or not bb:
+        return 0.0
+    ta, tb = set(aa.split()), set(bb.split())
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / max(len(ta), len(tb))
+
+
+def _try_apple_books(
+    title: str, authors: str, client: httpx.Client,
+) -> bytes | None:
+    """Apple Books search fallback. Returns a high-res JPEG or None."""
+    if not title:
+        return None
+    first = _first_author(authors)
+    term = f"{title} {first}".strip()
+    params = {
+        "term": term,
+        "entity": "ebook",
+        "limit": 5,
+        "country": "US",
+    }
+    try:
+        r = client.get(ITUNES_SEARCH, params=params)
+        if r.status_code != 200:
+            return None
+        results = (r.json() or {}).get("results") or []
+        if not results:
+            return None
+        # Pick the best title match above the threshold.
+        scored: list[tuple[float, dict]] = []
+        for item in results:
+            res_title = item.get("trackName") or item.get("collectionName") or ""
+            sim = _title_similarity(res_title, title)
+            scored.append((sim, item))
+        scored.sort(key=lambda t: t[0], reverse=True)
+        best_sim, best = scored[0]
+        if best_sim < _APPLE_TITLE_THRESHOLD:
+            return None
+        artwork = best.get("artworkUrl100") or best.get("artworkUrl60")
+        if not artwork:
+            return None
+        # iTunes serves 100x100; swap for a high-res 1500x1500 variant.
+        hires = artwork.replace("100x100bb", "1500x1500bb")
+        hires = hires.replace("100x100", "1500x1500")
+        ir = client.get(hires)
+        if ir.status_code == 200 and len(ir.content) > 1500:
+            return ir.content
+        # Fall back to the original size if the upscale isn't there.
+        orig = client.get(artwork)
+        if orig.status_code == 200 and len(orig.content) > 1500:
+            return orig.content
     except Exception:
         return None
     return None
@@ -180,6 +252,7 @@ def main() -> None:
 
     total_filled_ol = 0
     total_filled_gb = 0
+    total_filled_apple = 0
     total_processed = 0
     total_failed = 0
 
@@ -212,6 +285,12 @@ def main() -> None:
                     cover = _try_google_books(title, authors, client)
                     if cover:
                         source = "google"
+                if not cover:
+                    # Polite second-source sleep before Apple.
+                    time.sleep(max(args.sleep, 1.0))
+                    cover = _try_apple_books(title, authors, client)
+                    if cover:
+                        source = "apple"
 
                 if not cover:
                     total_failed += 1
@@ -240,18 +319,25 @@ def main() -> None:
 
                 if source == "openlibrary":
                     total_filled_ol += 1
-                else:
+                elif source == "google":
                     total_filled_gb += 1
+                else:
+                    total_filled_apple += 1
 
                 time.sleep(args.sleep)
 
             if args.limit and total_processed >= args.limit:
                 break
 
+    total_filled = (
+        total_filled_ol + total_filled_gb + total_filled_apple
+    )
     print(
         f"\nDone: processed {total_processed}, "
-        f"filled {total_filled_ol} from OpenLibrary, "
-        f"{total_filled_gb} from Google Books, "
+        f"filled {total_filled} ("
+        f"{total_filled_ol} OpenLibrary, "
+        f"{total_filled_gb} Google Books, "
+        f"{total_filled_apple} Apple Books), "
         f"{total_failed} unresolved."
     )
 
