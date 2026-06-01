@@ -2020,14 +2020,16 @@ def _derive_category(
     *,
     in_series: bool = False,
 ) -> str:
-    """Classify a book or series into Religious / Fiction / Other.
+    """Classify a book or series into Religious / Fiction.
 
     Order (highest priority first):
       1. Religious-author allowlist (with C.S. Lewis special case).
       2. Religious series-name hint (e.g. "Bible Study").
       3. Tag-based: Religious tags win over Fiction tags.
-      4. Series fallback -> Fiction (the user's series are all fiction).
-      5. Standalone fallback -> Other.
+      4. Fallback -> Fiction (the user's library is religious + fiction;
+         non-fiction outside religion isn't a category they read in, so
+         "Other" was just creating a confusing third bucket of fiction
+         standalones the heuristics couldn't otherwise attribute).
     """
     authors_l = (authors or "").lower()
     series_l = (series_name or "").lower()
@@ -2078,8 +2080,8 @@ def _derive_category(
                 if t in lower:
                     return "Fiction"
 
-    # 4/5. Fallback depends on whether this is a series or standalone.
-    return "Fiction" if in_series else "Other"
+    # 4. Fallback for both series and standalones.
+    return "Fiction"
 
 
 def _categorize_series(tag_blob: str | None) -> str:
