@@ -297,14 +297,7 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
                 </div>
             ` : ''}
 
-            ${book.review ? `
-                <div class="mt-4">
-                    <h5>My Review</h5>
-                    <div class="card card-body bg-body-tertiary">
-                        ${escapeHtml(book.review).replace(/\n/g, '<br>')}
-                    </div>
-                </div>
-            ` : ''}
+            ${reviewSectionHtml(book, isOwner)}
 
             ${book.series_link_id ? `
                 <div class="mt-4" id="series-row-section">
@@ -367,6 +360,7 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
     if (!isOwner) return;
 
     setupCoverUpload(book, username);
+    setupReviewEditor(book, username);
 
     attachRatingHandler(
         document.getElementById('rating-container')!,
@@ -528,6 +522,120 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
         });
     }
 
+}
+
+function reviewSectionHtml(book: any, isOwner: boolean): string {
+    const hasReview = !!(book.review && book.review.trim());
+    if (!hasReview && !isOwner) return '';
+
+    const readModeBody = hasReview
+        ? `<div id="review-text" class="card card-body bg-body-tertiary">
+               ${escapeHtml(book.review).replace(/\n/g, '<br>')}
+           </div>`
+        : `<div id="review-text" class="card card-body bg-body-tertiary text-muted review-empty"
+                ${isOwner ? 'role="button" tabindex="0"' : ''}>
+               ${isOwner ? 'Add a review' : ''}
+           </div>`;
+
+    const editBtn = isOwner
+        ? `<button type="button" class="btn btn-sm btn-link p-0 ms-2"
+                   id="review-edit-btn" title="Edit review"
+                   aria-label="Edit review">
+               <i class="bi bi-pencil"></i>
+           </button>`
+        : '';
+
+    return `
+        <div class="mt-4" id="review-section">
+            <div class="d-flex align-items-center mb-2">
+                <h5 class="mb-0">My Review</h5>
+                ${editBtn}
+            </div>
+            <div id="review-read-mode">
+                ${readModeBody}
+            </div>
+            ${isOwner ? `
+                <div id="review-edit-mode" hidden>
+                    <textarea class="form-control" id="review-textarea"
+                              rows="6"></textarea>
+                    <div class="mt-2 d-flex gap-2">
+                        <button type="button" class="btn btn-primary btn-sm"
+                                id="review-save-btn">
+                            <i class="bi bi-check-lg"></i> Save
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm"
+                                id="review-cancel-btn">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+function setupReviewEditor(book: any, username: string): void {
+    const section = document.getElementById('review-section');
+    if (!section) return;
+    const readMode = document.getElementById('review-read-mode');
+    const editMode = document.getElementById('review-edit-mode');
+    const editBtn = document.getElementById('review-edit-btn');
+    const saveBtn = document.getElementById('review-save-btn') as HTMLButtonElement | null;
+    const cancelBtn = document.getElementById('review-cancel-btn');
+    const textarea = document.getElementById('review-textarea') as HTMLTextAreaElement | null;
+    if (!readMode || !editMode || !textarea) return;
+
+    const enterEdit = () => {
+        textarea.value = book.review || '';
+        readMode.hidden = true;
+        editMode.hidden = false;
+        textarea.focus();
+    };
+    const exitEdit = () => {
+        editMode.hidden = true;
+        readMode.hidden = false;
+    };
+
+    editBtn?.addEventListener('click', enterEdit);
+
+    // Empty-state placeholder click also opens edit mode.
+    const emptyEl = readMode.querySelector('.review-empty');
+    emptyEl?.addEventListener('click', enterEdit);
+    emptyEl?.addEventListener('keydown', (e) => {
+        const ke = e as KeyboardEvent;
+        if (ke.key === 'Enter' || ke.key === ' ') {
+            ke.preventDefault();
+            enterEdit();
+        }
+    });
+
+    cancelBtn?.addEventListener('click', exitEdit);
+
+    saveBtn?.addEventListener('click', async () => {
+        const newReview = textarea.value.trim() || null;
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving…';
+        try {
+            await api.updateBook(username, book.id, { review: newReview });
+            book.review = newReview;
+            updateCachedBook(book.id, { review: newReview });
+            // Re-render the read block in place.
+            const newReadHtml = newReview
+                ? `<div id="review-text" class="card card-body bg-body-tertiary">${escapeHtml(newReview).replace(/\n/g, '<br>')}</div>`
+                : `<div id="review-text" class="card card-body bg-body-tertiary text-muted review-empty" role="button" tabindex="0">Add a review</div>`;
+            readMode.innerHTML = newReadHtml;
+            // Re-attach empty-state click if we landed on empty.
+            const reEmpty = readMode.querySelector('.review-empty');
+            reEmpty?.addEventListener('click', enterEdit);
+            exitEdit();
+            showAlert('Review updated', 'success');
+        } catch (err: any) {
+            showAlert(err.message || 'Save failed', 'danger');
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="bi bi-check-lg"></i> Save';
+        }
+    });
 }
 
 function setupCoverUpload(book: any, username: string): void {

@@ -1734,7 +1734,7 @@ def update_book(
     allowed = {
         "title", "sort_title", "authors", "author_sort",
         "series", "series_index", "series_link_id",
-        "description",
+        "description", "review",
         "cover_filename", "cover_updated_at",
         "file_path", "epub_hash", "isbn", "goodreads_id",
         "tags", "date_finished", "published_date",
