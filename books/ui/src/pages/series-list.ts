@@ -241,13 +241,22 @@ function applyFilters(): void {
 }
 
 // Category sections rendered top-to-bottom; empty sections are skipped.
-const CATEGORY_ORDER = ['Religious', 'Fiction', 'Other'];
+export const CATEGORY_ORDER = ['Religious', 'Fiction', 'Other'];
 
-function renderSeriesGrid(
+export interface SeriesGridOpts {
+    // When true, drop category headers — everything renders in a single
+    // grid. Useful when the caller has already filtered to one category.
+    showCategoryHeaders?: boolean;
+}
+
+export function renderSeriesGrid(
     container: HTMLElement,
     series: any[],
     standalones: any[],
+    opts: SeriesGridOpts = {},
 ): void {
+    const showHeaders = opts.showCategoryHeaders !== false;
+
     if (series.length === 0 && standalones.length === 0) {
         container.innerHTML = `
             <div class="text-center text-muted py-5">
@@ -258,38 +267,55 @@ function renderSeriesGrid(
         return;
     }
 
-    // Bucket by category. Series first, then standalones — both kinds
-    // share the bucket so categories render together.
-    const seriesBuckets: Record<string, any[]> = {
-        Religious: [], Fiction: [], Other: [],
-    };
-    const standaloneBuckets: Record<string, any[]> = {
-        Religious: [], Fiction: [], Other: [],
-    };
-    for (const s of series) {
-        const cat = seriesBuckets[s.category] ? s.category : 'Other';
-        seriesBuckets[cat].push(s);
-    }
-    for (const b of standalones) {
-        const cat = standaloneBuckets[b.category] ? b.category : 'Other';
-        standaloneBuckets[cat].push(b);
-    }
-
     let html = '';
-    for (const cat of CATEGORY_ORDER) {
-        const seriesItems = seriesBuckets[cat] || [];
-        const bookItems = standaloneBuckets[cat] || [];
-        if (seriesItems.length === 0 && bookItems.length === 0) continue;
-        html += `<h3 class="series-category-heading">${cat}</h3>`;
+    if (!showHeaders) {
+        // Single flat grid in caller-chosen order. Series first, then
+        // standalones — matches the natural visual hierarchy.
         html += '<div class="row g-3 mb-4">';
-        for (const s of seriesItems) html += renderSeriesCard(s);
-        for (const b of bookItems) html += renderStandaloneCard(b);
+        for (const s of series) html += renderSeriesCard(s);
+        for (const b of standalones) html += renderStandaloneCard(b);
         html += '</div>';
+    } else {
+        // Bucket by category. Series first, then standalones — both kinds
+        // share the bucket so categories render together.
+        const seriesBuckets: Record<string, any[]> = {
+            Religious: [], Fiction: [], Other: [],
+        };
+        const standaloneBuckets: Record<string, any[]> = {
+            Religious: [], Fiction: [], Other: [],
+        };
+        for (const s of series) {
+            const cat = seriesBuckets[s.category] ? s.category : 'Other';
+            seriesBuckets[cat].push(s);
+        }
+        for (const b of standalones) {
+            const cat = standaloneBuckets[b.category] ? b.category : 'Other';
+            standaloneBuckets[cat].push(b);
+        }
+
+        for (const cat of CATEGORY_ORDER) {
+            const seriesItems = seriesBuckets[cat] || [];
+            const bookItems = standaloneBuckets[cat] || [];
+            if (seriesItems.length === 0 && bookItems.length === 0) continue;
+            html += `<h3 class="series-category-heading">${cat}</h3>`;
+            html += '<div class="row g-3 mb-4">';
+            for (const s of seriesItems) html += renderSeriesCard(s);
+            for (const b of bookItems) html += renderStandaloneCard(b);
+            html += '</div>';
+        }
     }
     container.innerHTML = html;
+    attachSeriesGridHandlers(container);
+}
 
-    // Attach click handlers — series → series view, standalone → book detail.
+// Wire click handlers on a rendered series/standalone grid:
+//   .series-card → series view, .standalone-card → book detail,
+//   .series-author-link → home library filtered by author.
+// Exported so the unified library page can reuse it.
+export function attachSeriesGridHandlers(container: HTMLElement): void {
     container.querySelectorAll('.series-card').forEach(card => {
+        // Standalone cards also carry .series-card for styling — filter them.
+        if (card.classList.contains('standalone-card')) return;
         card.addEventListener('click', () => {
             const id = card.getAttribute('data-series-id');
             if (id) navigate(`#/series/${id}`);
@@ -314,7 +340,7 @@ function renderSeriesGrid(
     });
 }
 
-function renderSeriesCard(s: any): string {
+export function renderSeriesCard(s: any): string {
     const avgRating = s.avg_rating
         ? Math.round(s.avg_rating).toString()
         : '-';
@@ -377,7 +403,7 @@ function renderSeriesCard(s: any): string {
     `;
 }
 
-function renderStandaloneCard(b: any): string {
+export function renderStandaloneCard(b: any): string {
     // Status pill in the bottom-right of the cover.
     const status = (b.reading_status || 'unread') as string;
     const statusLabel = status === 'read'

@@ -1,13 +1,35 @@
+export type LibraryView = 'books-grouped' | 'series-cards' | 'books-flat';
+export type LibraryCategory = 'all' | 'Religious' | 'Fiction';
+
 export interface FilterState {
     q: string;
     filter: string;
     sort: string;
     order: string;
     rated: boolean | null;
+    // Optional: only used by the unified library page. Other consumers
+    // (series-edit, etc.) ignore these and pass through whatever default.
+    view?: LibraryView;
+    category?: LibraryCategory;
 }
 
 export interface FilterOption { value: string; label: string; hr?: boolean }
 export interface SortOption { value: string; label: string }
+
+export interface ViewOption { value: LibraryView; label: string }
+export interface CategoryOption { value: LibraryCategory; label: string }
+
+export const VIEW_OPTIONS: ViewOption[] = [
+    { value: 'books-grouped', label: 'Books by series' },
+    { value: 'series-cards', label: 'Series cards' },
+    { value: 'books-flat', label: 'Books (flat)' },
+];
+
+export const CATEGORY_OPTIONS: CategoryOption[] = [
+    { value: 'all', label: 'All categories' },
+    { value: 'Religious', label: 'Religious' },
+    { value: 'Fiction', label: 'Fiction' },
+];
 
 const DEFAULT_FILTER_OPTIONS: FilterOption[] = [
     { value: '', label: 'All books' },
@@ -40,6 +62,10 @@ export interface FilterBarOptions {
     filterOptions?: FilterOption[];
     sortOptions?: SortOption[];
     showRated?: boolean;
+    // When true, render the View selector + Category dropdown. Used by
+    // the unified library page; other pages omit them.
+    showView?: boolean;
+    showCategory?: boolean;
 }
 
 export function filterBarHtml(
@@ -50,11 +76,15 @@ export function filterBarHtml(
     let filters: FilterOption[];
     let sorts: SortOption[];
     let showRated = true;
+    let showView = false;
+    let showCategory = false;
 
     if (filterOptionsOrOpts && !Array.isArray(filterOptionsOrOpts)) {
         filters = filterOptionsOrOpts.filterOptions || DEFAULT_FILTER_OPTIONS;
         sorts = filterOptionsOrOpts.sortOptions || DEFAULT_SORT_OPTIONS;
         showRated = filterOptionsOrOpts.showRated !== false;
+        showView = filterOptionsOrOpts.showView === true;
+        showCategory = filterOptionsOrOpts.showCategory === true;
     } else {
         filters = filterOptionsOrOpts || DEFAULT_FILTER_OPTIONS;
         sorts = sortOptions || DEFAULT_SORT_OPTIONS;
@@ -74,9 +104,31 @@ export function filterBarHtml(
         sortHtml += `<option value="${opt.value}"${state.sort === opt.value ? ' selected' : ''}>${opt.label}</option>`;
     }
 
+    const currentView = state.view || 'books-grouped';
+    let viewHtml = '';
+    for (const opt of VIEW_OPTIONS) {
+        viewHtml += `<option value="${opt.value}"${currentView === opt.value ? ' selected' : ''}>${opt.label}</option>`;
+    }
+
+    const currentCategory = state.category || 'all';
+    let categoryHtml = '';
+    for (const opt of CATEGORY_OPTIONS) {
+        categoryHtml += `<option value="${opt.value}"${currentCategory === opt.value ? ' selected' : ''}>${opt.label}</option>`;
+    }
+
     return `
         <div class="filter-bar">
             <div class="row g-2 align-items-end">
+                ${showView ? `<div class="col-auto">
+                    <select class="form-select" id="filter-view" title="View mode">
+                        ${viewHtml}
+                    </select>
+                </div>` : ''}
+                ${showCategory ? `<div class="col-auto">
+                    <select class="form-select" id="filter-category" title="Category">
+                        ${categoryHtml}
+                    </select>
+                </div>` : ''}
                 <div class="col-auto position-relative">
                     <input type="text" class="form-control" id="filter-search"
                            placeholder="Search..."
@@ -131,6 +183,8 @@ export function attachFilterHandlers(
             const v = (container.querySelector('#filter-rated') as HTMLElement)?.dataset.rated;
             return v === 'true' ? true : v === 'false' ? false : null;
         })(),
+        view: ((container.querySelector('#filter-view') as HTMLSelectElement)?.value || undefined) as LibraryView | undefined,
+        category: ((container.querySelector('#filter-category') as HTMLSelectElement)?.value || undefined) as LibraryCategory | undefined,
     });
 
     const searchInput = container.querySelector('#filter-search') as HTMLInputElement;
@@ -154,7 +208,7 @@ export function attachFilterHandlers(
         });
     }
 
-    ['#filter-main', '#filter-sort'].forEach(sel => {
+    ['#filter-main', '#filter-sort', '#filter-view', '#filter-category'].forEach(sel => {
         const el = container.querySelector(sel);
         if (el) el.addEventListener('change', () => onChange(getState()));
     });
