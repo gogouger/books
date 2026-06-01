@@ -603,7 +603,7 @@ body::before {
 .segment-read { background-color: #198754; border-color: #198754; }
 .segment-reading { background-color: #c8893b; border-color: #c8893b; }
 .segment-unread { background-color: var(--bs-border-color); border-color: var(--bs-border-color); }
-.segment-not-owned { border-color: #dc3545; }
+.segment-not-owned { border-color: #b56a47; }  /* family rust, not Bootstrap bright red */
 /* Ghost slot: series entry not in the user's library. Hollow,
    dashed, no fill — visually distinct from a regular unread slot. */
 .segment-ghost {
@@ -629,10 +629,14 @@ body::before {
     opacity: 0.75;
 }
 
-/* Unread + not-owned: red border */
+/* Unread + not-owned: family rust border (not Bootstrap bright red) */
 .series-book-not-owned-unread {
-    border-left: 8px solid #dc3545;
+    border-left: 8px solid #b56a47;
 }
+
+/* Bootstrap's .text-danger / .bg-danger override — family rust for
+   "not owned / missing", not the alarming #dc3545. */
+.text-danger { color: #b56a47 !important; }
 
 .series-card-complete {
     border-left: 4px solid #198754;

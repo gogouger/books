@@ -27,7 +27,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from books.helpers import hardcover
 from books.helpers import db as books_db
@@ -90,9 +90,11 @@ async def refresh_stage(
     user_id: int,
     dry_run: bool,
     only_filter: str | None,
+    max_age_days: float,
+    force: bool,
 ) -> None:
     sql = (
-        "SELECT id, series_name, hardcover_series_id "
+        "SELECT id, series_name, hardcover_series_id, last_checked "
         "FROM series_link "
         "WHERE hardcover_series_id IS NOT NULL"
     )
@@ -102,6 +104,34 @@ async def refresh_stage(
         params = (f"%{only_filter}%",)
     sql += " ORDER BY series_name"
     rows = conn.execute(sql, params).fetchall()
+
+    # Cache-skip: don't re-fetch series whose last_checked is fresh.
+    # The Hardcover schema barely changes day-to-day; default 7d cache is
+    # more than generous. --force overrides.
+    if not force and max_age_days > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+        fresh = []
+        stale = []
+        for r in rows:
+            lc = r["last_checked"]
+            if not lc:
+                stale.append(r)
+                continue
+            try:
+                checked = datetime.fromisoformat(lc)
+            except ValueError:
+                stale.append(r)
+                continue
+            if checked >= cutoff:
+                fresh.append(r)
+            else:
+                stale.append(r)
+        if fresh:
+            print(
+                f"[refresh] skipping {len(fresh)} fresh series "
+                f"(checked within {max_age_days}d) — pass --force to override"
+            )
+        rows = stale
 
     print(f"\n[refresh] {len(rows)} linked series to refresh")
     refreshed = 0
@@ -172,6 +202,20 @@ async def main() -> None:
         default=None,
         help="filter series by substring (e.g. --only 'Stormlight')",
     )
+    ap.add_argument(
+        "--max-age",
+        type=float,
+        default=7.0,
+        help=(
+            "skip refresh for series whose last_checked is within this many "
+            "days (default 7). Avoids hammering the API with repeated syncs."
+        ),
+    )
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="ignore --max-age and refresh everything",
+    )
     args = ap.parse_args()
 
     conn = sqlite3.connect(args.db)
@@ -186,7 +230,10 @@ async def main() -> None:
     if args.stage in ("link", "both"):
         await link_stage(conn, args.dry_run, args.only)
     if args.stage in ("refresh", "both"):
-        await refresh_stage(conn, user_id, args.dry_run, args.only)
+        await refresh_stage(
+            conn, user_id, args.dry_run, args.only,
+            args.max_age, args.force,
+        )
     conn.close()
 
 
