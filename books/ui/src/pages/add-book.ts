@@ -7,7 +7,9 @@ import {
     SourceEntry,
 } from '../components/metadata-picker';
 
-export function renderAddBook(): void {
+export function renderAddBook(
+    params: Record<string, string> = {},
+): void {
     const app = document.getElementById('app')!;
     const username = getLibraryUsername()!;
 
@@ -141,6 +143,18 @@ export function renderAddBook(): void {
     searchBtn.addEventListener('click', doSearch);
     titleInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
     authorsInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+
+    // Prefill from ghost-card navigation (?title=&authors=&series=&series_index=).
+    if (params.title) {
+        titleInput.value = params.title;
+    }
+    if (params.authors) {
+        authorsInput.value = params.authors;
+    }
+    if (params.title) {
+        // Auto-kick the search so the user lands straight in the picker.
+        doSearch();
+    }
 }
 
 function showPreviewPicker(

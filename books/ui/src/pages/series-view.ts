@@ -26,6 +26,12 @@ export async function renderSeriesView(
         const seriesName: string = data.series;
         const hardcoverUrl: string | null = data.hardcover_url;
         const books: any[] = data.books;
+        const ghosts: any[] = (data.ghost_entries || []).map((g: any) => ({
+            ...g,
+            is_ghost: true,
+            series: seriesName,
+            series_link_id: seriesId,
+        }));
 
         // Sort by hc_position (Hardcover canonical) or series_index
         books.sort((a, b) => {
@@ -34,13 +40,26 @@ export async function renderSeriesView(
             return posA - posB;
         });
 
+        // Merge owned + ghosts ordered by position so the timeline
+        // matches the canonical series order.
+        const merged: any[] = [...books, ...ghosts].sort((a, b) => {
+            const pa = a.hc_position ?? a.series_index ?? a.position ?? 9999;
+            const pb = b.hc_position ?? b.series_index ?? b.position ?? 9999;
+            return pa - pb;
+        });
+
         const readCount = books.filter(b => b.reading_status === 'read').length;
         const notOwnedCount = books.filter(b => b.is_owned === 0).length;
+        const ghostCount = ghosts.length;
+        const totalSlots = books.length + ghostCount;
         const notOwnedLabel = notOwnedCount > 0
             ? ` &middot; <span class="text-danger">${notOwnedCount} not owned</span>`
             : '';
+        const ghostLabel = ghostCount > 0
+            ? ` &middot; <span class="text-muted">${ghostCount} not in library</span>`
+            : '';
 
-        const segmentsHtml = renderSegmentedBar(books);
+        const segmentsHtml = renderSegmentedBar(books, ghostCount);
         const isOwner: boolean = data.is_owner;
         const monitored: boolean = data.monitored !== false;
         const seriesComplete: boolean = data.series_complete !== false;
@@ -102,13 +121,13 @@ export async function renderSeriesView(
             </div>
             <h4 class="mb-3">${escapeHtml(seriesName)}</h4>
             <div class="text-muted mb-2">
-                ${books.length} book${books.length !== 1 ? 's' : ''}
-                &middot; ${readCount}/${books.length} read${notOwnedLabel}
+                ${totalSlots} book${totalSlots !== 1 ? 's' : ''}
+                &middot; ${readCount}/${books.length} read${notOwnedLabel}${ghostLabel}
             </div>
             <div class="mb-3">${segmentsHtml}</div>
         `;
 
-        html += `<div class="mb-4">${bookGridHtml(books)}</div>`;
+        html += `<div class="mb-4">${bookGridHtml(merged)}</div>`;
 
         app.innerHTML = html;
 
@@ -185,7 +204,7 @@ const STATUS_CLASS: Record<string, string> = {
     read: 'segment-read', reading: 'segment-reading',
 };
 
-function renderSegmentedBar(books: any[]): string {
+function renderSegmentedBar(books: any[], ghostCount: number = 0): string {
     const segments = books.map(b => {
         const cls = STATUS_CLASS[b.reading_status] || 'segment-unread';
         const owned = b.is_owned !== 0 ? '' : ' segment-not-owned';
@@ -196,6 +215,9 @@ function renderSegmentedBar(books: any[]): string {
         }
         return `<div class="series-segment ${cls}${owned}"></div>`;
     });
+    for (let i = 0; i < ghostCount; i++) {
+        segments.push(`<div class="series-segment segment-ghost"></div>`);
+    }
     return `<div class="series-segments">${segments.join('')}</div>`;
 }
 

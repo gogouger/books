@@ -38,15 +38,16 @@ initThemeToggle();
         if (me) setUser(me);
     }
 
-    // series overview is the default landing (no hash);
-    // the flat library is still reachable via the Library nav link.
+    // Series overview is the default landing (no hash); the flat
+    // library view is reachable at #/library and via the Library nav.
     setDefaultRoute(() => renderSeriesList());
     addRoute('/book/:id/edit', (p) => renderBookEdit(p));
     addRoute('/book/:id', (p) => renderBookDetail(p));
     addRoute('/series', () => renderSeriesList());
     addRoute('/series/:id/edit', (p) => renderSeriesEdit(p));
     addRoute('/series/:id', (p) => renderSeriesView(p));
-    addRoute('/add', () => renderAddBook());
+    addRoute('/library', () => renderLibrary());
+    addRoute('/add', (p) => renderAddBook(p));
 
     bootstrapAuth();
     updateNavbar();

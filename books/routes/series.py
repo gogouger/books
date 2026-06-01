@@ -77,6 +77,11 @@ def get_series(
         us.get("display_name") or link["series_name"]
     )
     hardcover_slug = link.get("hardcover_slug")
+    # Ghost entries: series_entries rows the user doesn't own.
+    # Falls back to empty list when series_entries isn't populated.
+    ghosts = db.get_series_ghost_entries(
+        owner["id"], series_link_id
+    )
     return {
         "series_link_id": series_link_id,
         "series": series_name,
@@ -87,6 +92,7 @@ def get_series(
             if hardcover_slug else None
         ),
         "books": books,
+        "ghost_entries": ghosts,
         "is_owner": is_owner,
     }
 

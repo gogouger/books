@@ -10,7 +10,7 @@ import {
 let currentState: FilterState = {
     q: '',
     filter: '',
-    sort: 'title',
+    sort: 'series',
     order: 'asc',
     rated: null,
 };
@@ -26,11 +26,13 @@ let isLoading = false;
 let observer: IntersectionObserver | null = null;
 let lastLoadedState: FilterState | null = null;
 let scrollListener: (() => void) | null = null;
+// When the user toggles ghost-entry overlay off (sticky across loads).
+let hideUnowned = false;
 
 const DEFAULT_STATE: FilterState = {
     q: '',
     filter: '',
-    sort: 'title',
+    sort: 'series',
     order: 'asc',
     rated: null,
 };
@@ -106,6 +108,17 @@ export async function renderLibrary(): Promise<void> {
     const app = document.getElementById('app')!;
     app.innerHTML =
         filterBarHtml(currentState) +
+        // "Hide unowned" toggle — only meaningful in sort=series mode
+        // since other sorts don't request ghosts.
+        `<div class="mb-2 d-flex gap-3 align-items-center small">
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox"
+                       id="hide-unowned-toggle" ${hideUnowned ? 'checked' : ''}>
+                <label class="form-check-label text-muted" for="hide-unowned-toggle">
+                    Hide unowned (ghost entries)
+                </label>
+            </div>
+        </div>` +
         '<div id="book-grid-container"></div>' +
         '<div id="scroll-sentinel"></div>';
 
@@ -114,13 +127,22 @@ export async function renderLibrary(): Promise<void> {
         resetAndReload();
     });
 
+    const ghostToggle = app.querySelector('#hide-unowned-toggle') as HTMLInputElement | null;
+    if (ghostToggle) {
+        ghostToggle.addEventListener('change', () => {
+            hideUnowned = ghostToggle.checked;
+            resetAndReload();
+        });
+    }
+
     setupScrollTracking();
 
     if (canRestore) {
         // Restore from cache
         const gridContainer = document.getElementById('book-grid-container')!;
         const countEl = document.getElementById('book-count');
-        gridContainer.innerHTML = bookGridHtml(allBooks);
+        const grouped = currentState.sort === 'series';
+        gridContainer.innerHTML = bookGridHtml(allBooks, { grouped });
         attachGridClickHandlers(gridContainer, applyAuthorFilter);
         if (countEl) {
             countEl.textContent = `${totalBooks} book${totalBooks !== 1 ? 's' : ''}`;
@@ -207,9 +229,11 @@ async function loadMoreBooks(): Promise<void> {
             params.max_rating = stars;
         }
 
-        // Auto-filter based on sort field
+        // sort=series clusters books by series then trails standalones.
+        // Don't force has_series=true — standalones still belong here.
         if (currentState.sort === 'series') {
-            params.has_series = true;
+            params.group_by_series = true;
+            if (!hideUnowned) params.include_ghosts = true;
         } else if (currentState.sort === 'date_finished') {
             if (!params.reading_status) {
                 params.reading_status = 'read';
@@ -219,13 +243,27 @@ async function loadMoreBooks(): Promise<void> {
         const data = await api.getBooks(username, params);
         totalBooks = data.total;
 
+        const grouped = currentState.sort === 'series';
         if (isFirstBatch) {
             allBooks = data.books;
-            gridContainer.innerHTML = bookGridHtml(data.books);
+            gridContainer.innerHTML = bookGridHtml(
+                data.books, { grouped },
+            );
             attachGridClickHandlers(gridContainer, applyAuthorFilter);
         } else {
             allBooks = allBooks.concat(data.books);
-            appendToBookGrid(gridContainer, data.books, applyAuthorFilter);
+            if (grouped) {
+                // Full re-render so headers stay correct across
+                // group boundaries between batches.
+                gridContainer.innerHTML = bookGridHtml(
+                    allBooks, { grouped: true },
+                );
+                attachGridClickHandlers(gridContainer, applyAuthorFilter);
+            } else {
+                appendToBookGrid(
+                    gridContainer, data.books, applyAuthorFilter,
+                );
+            }
         }
 
         if (countEl) {

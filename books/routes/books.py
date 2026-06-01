@@ -122,8 +122,25 @@ def list_books(
     order: str = "asc",
     limit: int = Query(default=50, le=200),
     offset: int = 0,
+    include_ghosts: bool = False,
+    group_by_series: bool | None = None,
 ) -> dict:
     user_id = owner["id"]
+    # When grouping by series, fetch a wider page so we can
+    # reorder client-side. The frontend currently paginates
+    # via infinite scroll but the grouped view benefits from
+    # bigger first batches; keep the cap from Query above.
+    effective_sort = sort
+    effective_has_series = has_series
+    grouped = (
+        group_by_series
+        if group_by_series is not None
+        else sort == "series"
+    )
+    # In grouped mode we still want standalones, so do NOT
+    # force has_series=true upstream.
+    if grouped:
+        effective_sort = "series"
     books = db.get_books(
         user_id,
         q=q,
@@ -133,9 +150,9 @@ def list_books(
         max_rating=max_rating,
         is_favorite=is_favorite,
         is_owned=is_owned,
-        has_series=has_series,
+        has_series=effective_has_series,
         rated=rated,
-        sort=sort,
+        sort=effective_sort,
         order=order,
         limit=limit,
         offset=offset,
@@ -149,9 +166,77 @@ def list_books(
         max_rating=max_rating,
         is_favorite=is_favorite,
         is_owned=is_owned,
-        has_series=has_series,
+        has_series=effective_has_series,
         rated=rated,
     )
+
+    if grouped:
+        # Place all series books first (by series, series_index),
+        # then standalones (by title) at the tail.
+        series_books = [
+            b for b in books
+            if b.get("series_link_id") is not None
+        ]
+        standalone_books = [
+            b for b in books
+            if b.get("series_link_id") is None
+        ]
+        # Stable sort: series tuple, then title for standalones.
+        series_books.sort(key=lambda b: (
+            (b.get("series") or "").lower(),
+            b.get("series_index") or 0,
+        ))
+        standalone_books.sort(key=lambda b: (
+            (b.get("sort_title") or b.get("title") or "").lower()
+        ))
+        books = series_books + standalone_books
+
+    # Optionally interleave ghost entries from series the user
+    # owns at least one book in. Only the first batch carries
+    # ghosts to avoid duplicating them across pagination.
+    if include_ghosts and offset == 0:
+        ghosts = db.get_ghost_entries_for_user(user_id)
+        # Mark explicitly.
+        for g in ghosts:
+            g["is_ghost"] = True
+        if grouped:
+            # Merge ghosts into the series cluster by series name.
+            from itertools import groupby
+            owned_by_series: dict[int, list[dict]] = {}
+            owned_seq_keys: list[int] = []
+            for b in books:
+                slid = b.get("series_link_id")
+                if slid is None:
+                    continue
+                if slid not in owned_by_series:
+                    owned_by_series[slid] = []
+                    owned_seq_keys.append(slid)
+                owned_by_series[slid].append(b)
+            ghost_by_series: dict[int, list[dict]] = {}
+            for g in ghosts:
+                slid = g.get("series_link_id")
+                if slid is None:
+                    continue
+                ghost_by_series.setdefault(slid, []).append(g)
+            merged_series: list[dict] = []
+            for slid in owned_seq_keys:
+                combined = list(owned_by_series[slid])
+                combined.extend(ghost_by_series.get(slid, []))
+                combined.sort(key=lambda b: (
+                    b.get("series_index") or 0,
+                ))
+                merged_series.extend(combined)
+            standalone_books = [
+                b for b in books
+                if b.get("series_link_id") is None
+            ]
+            books = merged_series + standalone_books
+        else:
+            books = list(books) + ghosts
+        # Don't inflate `total` with ghosts to avoid breaking
+        # infinite-scroll exit conditions; the frontend treats
+        # ghosts as ride-along only on the first batch.
+
     return {
         "books": books,
         "total": total,
@@ -160,6 +245,7 @@ def list_books(
             "username": owner["username"],
             "display_name": owner["display_name"],
         },
+        "group_by_series": grouped,
     }
 
 

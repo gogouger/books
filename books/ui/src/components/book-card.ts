@@ -1,6 +1,7 @@
 import { api } from '../api';
 
 export function bookCardHtml(book: any): string {
+    if (book.is_ghost) return ghostCardHtml(book);
     const coverImg = book.cover_filename
         ? `<img src="${api.coverUrl(book.user_id, book.cover_filename, book.cover_updated_at)}"
                alt="${escapeHtml(book.title)}" loading="lazy">`
@@ -60,6 +61,50 @@ export function bookCardHtml(book: any): string {
             </div>
         </div>
     `;
+}
+
+// Ghost: a series_entries row the user doesn't have a book for.
+// Renders as a greyed tile with a "Not in library" badge and an
+// "Add to library" hint. Click navigates to /add prefilled.
+export function ghostCardHtml(book: any): string {
+    const seriesText = book.series
+        ? `${escapeHtml(book.series)}${book.series_index ? ` #${book.series_index}` : ''}`
+        : '';
+    const seriesInfo = book.series
+        ? book.series_link_id
+            ? `<div class="card-series"><a href="#/series/${book.series_link_id}" class="card-series-link">${seriesText}</a></div>`
+            : `<div class="card-series">${seriesText}</div>`
+        : '';
+
+    const params = new URLSearchParams();
+    if (book.title) params.set('title', book.title);
+    if (book.authors) params.set('authors', book.authors);
+    if (book.series) params.set('series', book.series);
+    if (book.series_index !== null && book.series_index !== undefined) {
+        params.set('series_index', String(book.series_index));
+    }
+    const addHref = `#/add?${params.toString()}`;
+
+    return `
+        <div class="book-card card ghost-card" data-add-href="${escapeAttr(addHref)}" role="button" title="Add to library">
+            <div class="cover-container ghost-cover">
+                <div class="no-cover"><i class="bi bi-plus-circle"></i></div>
+                <span class="ghost-badge">Not in library</span>
+            </div>
+            <div class="card-info">
+                <div class="card-gutter gutter-unread"></div>
+                <div class="card-body">
+                    <div class="card-title">${escapeHtml(book.title || '')}</div>
+                    <div class="card-author">${escapeHtml(book.authors || '')}</div>
+                    ${seriesInfo}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function escapeAttr(text: string): string {
+    return escapeHtml(text).replace(/"/g, '&quot;');
 }
 
 function authorsHtml(authors: string): string {

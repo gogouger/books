@@ -42,7 +42,11 @@ let handleRoute: () => void;
 
 export function startRouter(): void {
     handleRoute = () => {
-        const hash = window.location.hash.slice(1);
+        const raw = window.location.hash.slice(1);
+        // Split route path from optional query string ("?k=v&..").
+        const qIdx = raw.indexOf('?');
+        const hash = qIdx >= 0 ? raw.slice(0, qIdx) : raw;
+        const queryStr = qIdx >= 0 ? raw.slice(qIdx + 1) : '';
 
         if (hash) {
             for (const route of routes) {
@@ -52,6 +56,13 @@ export function startRouter(): void {
                     route.keys.forEach((key, i) => {
                         params[key] = decodeURIComponent(match[i + 1]);
                     });
+                    // Fold query string into params (path keys win).
+                    if (queryStr) {
+                        const sp = new URLSearchParams(queryStr);
+                        sp.forEach((v, k) => {
+                            if (!(k in params)) params[k] = v;
+                        });
+                    }
                     route.handler(params);
                     updateActiveNav(hash);
                     return;

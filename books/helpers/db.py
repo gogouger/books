@@ -1387,13 +1387,19 @@ def get_books(
             )
             params.append(letter.upper())
 
+    # For sort=series we want series books clustered FIRST then
+    # standalones, so push NULL series to the end via an explicit
+    # `series IS NULL` ordering key (NULL is lowest in ASC, which
+    # would otherwise put standalones at the top).
     allowed_sort = {
         "title": "sort_title",
         "author": "author_sort",
         "date_added": "date_added",
         "date_finished": "date_finished",
         "rating": "rating",
-        "series": "series, series_index",
+        "series": (
+            "(series IS NULL), series, series_index, sort_title"
+        ),
     }
     sort_col = allowed_sort.get(sort, "sort_title")
     order_dir = "DESC" if order.lower() == "desc" else "ASC"
@@ -2309,6 +2315,10 @@ def get_series_list(
         if r["manual_category"]
     }
 
+    # Ghost-aware counts: total_books reflects the full
+    # series via series_entries; falls back to owned count.
+    entry_counts = get_series_entry_counts(user_id)
+
     for s in series_list:
         trip = seqs.get(s["series_link_id"], ([], [], []))
         s["status_seq"] = "".join(trip[0])
@@ -2324,7 +2334,202 @@ def get_series_list(
             in_series=True,
         )
 
+        ec = entry_counts.get(s["series_link_id"])
+        owned_count = s.get("total_books") or 0
+        if ec and ec["total"] >= owned_count and ec["total"] > 0:
+            s["entries_total"] = ec["total"]
+            s["entries_owned"] = owned_count
+            s["ghost_count"] = max(0, ec["total"] - owned_count)
+            # Expose the entry total as total_books so tile UI
+            # shows full-series counts; preserve owned via
+            # entries_owned for callers that want the original.
+            s["total_books"] = ec["total"]
+        else:
+            s["entries_total"] = owned_count
+            s["entries_owned"] = owned_count
+            s["ghost_count"] = 0
+
+        # Extend the segmented bar to include ghost slots so
+        # the visualization reflects the full series.
+        ghost_count = s["ghost_count"]
+        if ghost_count > 0:
+            s["status_seq"] = s["status_seq"] + ("u" * ghost_count)
+            s["owned_seq"] = s["owned_seq"] + ("0" * ghost_count)
+            s["progress_seq"] = (
+                s["progress_seq"]
+                + ("," if s["progress_seq"] else "")
+                + ",".join(["0.00"] * ghost_count)
+            )
+
     return series_list
+
+
+def get_series_entry_counts(
+    user_id: int,
+) -> dict[int, dict]:
+    """Per series_link_id, return ghost-aware counts.
+
+    Returns {series_link_id: {"total": N, "owned": N,
+    "ghost": N}} where total uses `series_entries` when
+    populated and falls back to the user's owned count
+    otherwise. `ghost` is the number of entries the user
+    doesn't have a book for. Counts effective-linked
+    entries only (integer-position entries unless overridden).
+    """
+    conn = get_db()
+    rows = conn.execute(
+        f"""SELECT se.series_link_id,
+                  COUNT(*) as entry_total,
+                  SUM(
+                      CASE WHEN EXISTS (
+                          SELECT 1 FROM books b
+                          WHERE b.user_id = ?
+                              AND b.series_link_id = se.series_link_id
+                              AND (
+                                  b.series_index = se.position
+                                  OR (
+                                      LOWER(TRIM(b.title)) = LOWER(TRIM(se.title))
+                                      AND b.authors IS NOT NULL
+                                      AND se.author IS NOT NULL
+                                      AND LOWER(TRIM(b.authors))
+                                          = LOWER(TRIM(se.author))
+                                  )
+                              )
+                              AND b.series_ignored = 0
+                      ) THEN 1 ELSE 0 END
+                  ) as entry_owned
+           FROM series_entries se
+           LEFT JOIN user_entry_status ues
+               ON ues.series_entry_id = se.id
+               AND ues.user_id = ?
+           WHERE {_EFFECTIVE_STATUS} = 'linked'
+           GROUP BY se.series_link_id""",
+        (user_id, user_id),
+    ).fetchall()
+    conn.close()
+    out: dict[int, dict] = {}
+    for r in rows:
+        total = r["entry_total"] or 0
+        owned = r["entry_owned"] or 0
+        out[r["series_link_id"]] = {
+            "total": total,
+            "owned": owned,
+            "ghost": max(0, total - owned),
+        }
+    return out
+
+
+def get_series_ghost_entries(
+    user_id: int, series_link_id: int,
+) -> list[dict]:
+    """Return ghost (unowned) series entries for a series.
+
+    A ghost is a series_entries row whose effective status
+    is 'linked' but the user has no matching book (by
+    series_index/position or normalized title+author). One
+    dict per ghost with fields {position, title, author,
+    hardcover_book_id}.
+    """
+    conn = get_db()
+    rows = conn.execute(
+        f"""SELECT se.position, se.title, se.author,
+                  se.hardcover_book_id
+           FROM series_entries se
+           LEFT JOIN user_entry_status ues
+               ON ues.series_entry_id = se.id
+               AND ues.user_id = ?
+           WHERE se.series_link_id = ?
+               AND {_EFFECTIVE_STATUS} = 'linked'
+               AND NOT EXISTS (
+                   SELECT 1 FROM books b
+                   WHERE b.user_id = ?
+                       AND b.series_link_id = se.series_link_id
+                       AND (
+                           b.series_index = se.position
+                           OR (
+                               LOWER(TRIM(b.title)) = LOWER(TRIM(se.title))
+                               AND b.authors IS NOT NULL
+                               AND se.author IS NOT NULL
+                               AND LOWER(TRIM(b.authors))
+                                   = LOWER(TRIM(se.author))
+                           )
+                       )
+                       AND b.series_ignored = 0
+               )
+           ORDER BY se.position""",
+        (user_id, series_link_id, user_id),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_ghost_entries_for_user(
+    user_id: int,
+) -> list[dict]:
+    """Return ghost entries across all series the user owns at least one book in.
+
+    Used for the library flat-list ghost overlay. Returns
+    dicts shaped like book records so the frontend can
+    render them through the same grid component.
+    """
+    conn = get_db()
+    rows = conn.execute(
+        f"""SELECT se.position as series_index,
+                  se.title,
+                  se.author as authors,
+                  se.series_link_id,
+                  sl.series_name as series,
+                  se.hardcover_book_id
+           FROM series_entries se
+           JOIN series_link sl ON sl.id = se.series_link_id
+           LEFT JOIN user_entry_status ues
+               ON ues.series_entry_id = se.id
+               AND ues.user_id = ?
+           WHERE {_EFFECTIVE_STATUS} = 'linked'
+               AND EXISTS (
+                   SELECT 1 FROM books b
+                   WHERE b.user_id = ?
+                       AND b.series_link_id = se.series_link_id
+                       AND b.series_ignored = 0
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM books b
+                   WHERE b.user_id = ?
+                       AND b.series_link_id = se.series_link_id
+                       AND (
+                           b.series_index = se.position
+                           OR (
+                               LOWER(TRIM(b.title)) = LOWER(TRIM(se.title))
+                               AND b.authors IS NOT NULL
+                               AND se.author IS NOT NULL
+                               AND LOWER(TRIM(b.authors))
+                                   = LOWER(TRIM(se.author))
+                           )
+                       )
+                       AND b.series_ignored = 0
+               )
+           ORDER BY sl.series_name, se.position""",
+        (user_id, user_id, user_id),
+    ).fetchall()
+    conn.close()
+    out: list[dict] = []
+    for r in rows:
+        out.append({
+            "id": None,
+            "is_ghost": True,
+            "title": r["title"],
+            "authors": r["authors"] or "",
+            "series": r["series"],
+            "series_link_id": r["series_link_id"],
+            "series_index": r["series_index"],
+            "hardcover_book_id": r["hardcover_book_id"],
+            "cover_filename": None,
+            "user_id": user_id,
+            "is_owned": 0,
+            "reading_status": "unread",
+            "tags": [],
+        })
+    return out
 
 
 def get_standalone_books_for_overview(

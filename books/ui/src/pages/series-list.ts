@@ -336,7 +336,7 @@ function renderSeriesCard(s: any): string {
 
     const segmentsHtml = renderSegmentedBar(
         s.status_seq || '', s.owned_seq || '',
-        s.progress_seq || ''
+        s.progress_seq || '', s.ghost_count || 0,
     );
 
     const authorHtml = s.authors
@@ -436,17 +436,25 @@ const STATUS_CLASS: Record<string, string> = {
 };
 
 function renderSegmentedBar(
-    statusSeq: string, ownedSeq: string, progressSeq: string
+    statusSeq: string, ownedSeq: string, progressSeq: string,
+    ghostCount: number = 0,
 ): string {
     const progValues = progressSeq
         ? progressSeq.split(',').map(Number)
         : [];
     const segments: string[] = [];
+    // The last `ghostCount` slots are series_entries the user
+    // doesn't own — render as dashed/hollow ghosts instead of
+    // the not-owned (red border) treatment for placeholder books.
+    const ghostStart = statusSeq.length - ghostCount;
     for (let i = 0; i < statusSeq.length; i++) {
+        const isGhost = i >= ghostStart;
         const cls = STATUS_CLASS[statusSeq[i]] || 'segment-unread';
         const owned = ownedSeq[i] !== '0' ? '' : ' segment-not-owned';
         const prog = progValues[i] || 0;
-        if (statusSeq[i] === 'b') {
+        if (isGhost) {
+            segments.push(`<div class="series-segment segment-ghost"></div>`);
+        } else if (statusSeq[i] === 'b') {
             const pct = Math.round(prog * 100);
             segments.push(`<div class="series-segment${owned}" style="border-color:var(--bs-primary);background:linear-gradient(to right,var(--bs-primary) ${pct}%,var(--bs-secondary-bg) ${pct}%)"></div>`);
         } else {
