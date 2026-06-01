@@ -5,6 +5,9 @@ For each book with `cover_filename IS NULL`, try in order:
   1. Open Library search by title + author (cover_i -> covers.openlibrary.org)
   2. Google Books search by title + author (volumeInfo.imageLinks)
   3. Apple Books / iTunes search (artworkUrl100 upscaled to 1500x1500)
+  4. Open Library /search.json with strict title-similarity scoring
+     (catches books OL has under slightly different titles where the
+      naive first-hit lookup in step 1 misses)
 
 On success, writes the JPEG to DATA_DIR/covers/<user_id>/<book_id>.jpg
 and updates `cover_filename` + `cover_updated_at` in the DB.
@@ -25,7 +28,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from books.helpers import db
+from books.helpers import db, hardcover
 
 
 USER_AGENT = "meron-books-bot/1.0 gordon@ggouger.com"
@@ -188,6 +191,103 @@ def _try_google_books(
     return None
 
 
+# OpenLibrary placeholder ("no cover available") image is ~3 KB.
+# Anything > 5 KB is a real cover.
+_OL_COVER_MIN_BYTES = 5 * 1024
+
+# Title-similarity floor for the OL search.json fallback. Tighter than
+# Apple (which uses 0.6) because OL routinely returns adjacent series
+# entries when the exact title is missing — letting those through would
+# happily save the wrong cover.
+_OL_SEARCH_TITLE_THRESHOLD = 0.7
+
+
+def _try_openlibrary_search(
+    title: str, authors: str, client: httpx.Client,
+) -> bytes | None:
+    """OL /search.json fallback with strict title-similarity scoring.
+
+    Different from `_try_openlibrary`: that one trusts OL's first hit
+    blindly. This one fetches up to 3 candidates, scores each title
+    against the query using the same normalize + fuzzy-ratio helpers
+    Hardcover matching uses, and only accepts hits >= 0.7. Designed
+    to catch books where OL has the title but indexed under a slight
+    variant (e.g. with/without a subtitle).
+    """
+    if not title:
+        return None
+    first = _first_author(authors)
+    query_norm = hardcover.normalize_title(title)
+
+    # Try the full title first; if OL returns nothing, retry with the
+    # subtitle-stripped normalized title (OL search is exact-tokens-y
+    # and trips on long subtitles like ": A Doctrinal Study").
+    search_titles = [title]
+    if query_norm and query_norm != title.strip().lower():
+        search_titles.append(query_norm)
+
+    docs: list[dict] = []
+    for search_title in search_titles:
+        params = {
+            "title": search_title,
+            "limit": 3,
+            "fields": "cover_i,title,author_name",
+        }
+        if first:
+            params["author"] = first
+        try:
+            r = client.get(OL_SEARCH, params=params)
+            if r.status_code != 200:
+                continue
+            docs = (r.json() or {}).get("docs") or []
+        except Exception:
+            continue
+        if docs:
+            break
+        # Polite pause between OL calls.
+        time.sleep(1.5)
+    if not docs:
+        return None
+
+    best_cover_id = None
+    best_score = 0.0
+    for doc in docs:
+        cover_id = doc.get("cover_i")
+        if not cover_id:
+            continue
+        cand_title = doc.get("title") or ""
+        score = hardcover._fuzzy_ratio(
+            query_norm, hardcover.normalize_title(cand_title),
+        )
+        if score > best_score:
+            best_score = score
+            best_cover_id = cover_id
+
+    if best_cover_id is None or best_score < _OL_SEARCH_TITLE_THRESHOLD:
+        return None
+
+    # Polite pause before hitting the cover CDN (separate origin but
+    # still OL).
+    time.sleep(1.5)
+    try:
+        cr = client.get(
+            OL_COVER.format(cover_id=best_cover_id),
+            params={"default": "false"},
+        )
+    except Exception:
+        return None
+    if cr.status_code != 200:
+        return None
+    if len(cr.content) <= _OL_COVER_MIN_BYTES:
+        return None
+    # Validate it's a real JPEG (OL serves JPEGs even at /b/id/*-L.jpg).
+    if not cr.content.startswith(b"\xff\xd8\xff"):
+        return None
+    if not cr.headers.get("content-type", "").startswith("image"):
+        return None
+    return cr.content
+
+
 def _missing_books_for(user_id: int) -> list[dict]:
     conn = db.get_db()
     rows = conn.execute(
@@ -253,6 +353,7 @@ def main() -> None:
     total_filled_ol = 0
     total_filled_gb = 0
     total_filled_apple = 0
+    total_filled_ol_search = 0
     total_processed = 0
     total_failed = 0
 
@@ -291,6 +392,17 @@ def main() -> None:
                     cover = _try_apple_books(title, authors, client)
                     if cover:
                         source = "apple"
+                if not cover:
+                    # Final fallback: OpenLibrary /search.json with
+                    # title-similarity scoring (catches near-miss
+                    # titles the first-hit OL lookup at step 1
+                    # silently skipped).
+                    time.sleep(1.5)
+                    cover = _try_openlibrary_search(
+                        title, authors, client,
+                    )
+                    if cover:
+                        source = "openlibrary_search"
 
                 if not cover:
                     total_failed += 1
@@ -321,8 +433,10 @@ def main() -> None:
                     total_filled_ol += 1
                 elif source == "google":
                     total_filled_gb += 1
-                else:
+                elif source == "apple":
                     total_filled_apple += 1
+                elif source == "openlibrary_search":
+                    total_filled_ol_search += 1
 
                 time.sleep(args.sleep)
 
@@ -330,14 +444,16 @@ def main() -> None:
                 break
 
     total_filled = (
-        total_filled_ol + total_filled_gb + total_filled_apple
+        total_filled_ol + total_filled_gb
+        + total_filled_apple + total_filled_ol_search
     )
     print(
         f"\nDone: processed {total_processed}, "
         f"filled {total_filled} ("
         f"{total_filled_ol} OpenLibrary, "
         f"{total_filled_gb} Google Books, "
-        f"{total_filled_apple} Apple Books), "
+        f"{total_filled_apple} Apple Books, "
+        f"{total_filled_ol_search} OL search), "
         f"{total_failed} unresolved."
     )
 
