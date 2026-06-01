@@ -70,13 +70,20 @@ export function startRouter(): void {
             }
         }
 
-        // No hash or no match: render default (library)
+        // No hash or no match: render default (library). Preserve any
+        // query params from the hash so presets like `#/?view=...` work.
         if (defaultHandler) {
-            // Clean URL: remove any hash fragment
-            if (window.location.hash) {
+            const params: Record<string, string> = {};
+            if (queryStr) {
+                const sp = new URLSearchParams(queryStr);
+                sp.forEach((v, k) => { params[k] = v; });
+            }
+            // If the hash held no useful info (no route + no query),
+            // strip it so the URL bar stays clean.
+            if (window.location.hash && !queryStr) {
                 history.replaceState(null, '', window.location.pathname);
             }
-            defaultHandler({});
+            defaultHandler(params);
             updateActiveNav('');
         }
     };

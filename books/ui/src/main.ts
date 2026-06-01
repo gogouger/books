@@ -40,14 +40,18 @@ initThemeToggle();
 
     // Library is the default landing — flat list grouped by series
     // (sort=series default, sea-green section headers). The series-tile
-    // overview lives at #/series for browse-by-category.
-    setDefaultRoute(() => renderLibrary());
+    // overview is now a preset on the same page (view=series-cards).
+    setDefaultRoute((p) => renderLibrary(p));
     addRoute('/book/:id/edit', (p) => renderBookEdit(p));
     addRoute('/book/:id', (p) => renderBookDetail(p));
-    addRoute('/series', () => renderSeriesList());
+    addRoute('/series', (p) => renderLibrary({
+        ...p,
+        view: 'series-cards',
+        category: p.category || 'all',
+    }));
     addRoute('/series/:id/edit', (p) => renderSeriesEdit(p));
     addRoute('/series/:id', (p) => renderSeriesView(p));
-    addRoute('/library', () => renderLibrary());
+    addRoute('/library', (p) => renderLibrary(p));
     addRoute('/add', (p) => renderAddBook(p));
 
     bootstrapAuth();
@@ -59,6 +63,10 @@ initThemeToggle();
         resetLibraryFilters();
     });
     document.getElementById('nav-series')?.addEventListener('click', () => {
+        // Series link is now a preset on the library page — reset library
+        // state so the preset applies cleanly. Also reset the legacy
+        // series-list cache in case anything else still touches it.
+        resetLibraryFilters();
         resetSeriesFilters();
     });
 })();
