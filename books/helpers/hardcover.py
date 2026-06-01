@@ -451,12 +451,46 @@ def _is_likely_english(title: str) -> bool:
     return ascii_count / len(title) > 0.8
 
 
+_EDITORIAL_VARIANT_RE = re.compile(
+    r"(?ix)"
+    r"(?:^|[\s,(])"  # boundary
+    r"(?:"
+    r"part\s+(?:one|two|three|four|five|\d+)"  # split editions
+    r"|dramatized\s+adaptation"
+    r"|audio\s+edition|audiobook(?:\s+edition)?"
+    r"|illustrated\s+edition|deluxe\s+edition"
+    r"|\d+\s+of\s+\d+"  # "(3 of 5)"
+    r")"
+)
+
+
+def _is_editorial_variant(title: str) -> bool:
+    """True if the title looks like a split/audio/dramatized edition.
+
+    These are real Hardcover entries at fractional positions (e.g. 1.1,
+    1.2) that aren't separate books — they're alternate packagings of
+    the same book. Including them as series_entries adds noise: a 5-book
+    series like Stormlight balloons to 25 entries because each main
+    book has split editions + dramatized adaptations + early drafts.
+    """
+    if not title:
+        return False
+    if _EDITORIAL_VARIANT_RE.search(title):
+        return True
+    # Sanderson's early-draft "Prime" titles — match only as full word.
+    if re.search(r"\bPrime\b", title):
+        return True
+    return False
+
+
 def dedup_series_books(raw_entries: list[dict]) -> list[dict]:
     """Pick one book per position from raw HC entries.
 
-    Excludes compilations and null positions. At each position,
-    prefers English titles (by character set), then picks the
-    entry with the highest ratings_count.
+    Excludes compilations, null positions, and editorial variants
+    (Part 1/Part 2 split editions, dramatized adaptations, Prime
+    drafts, audio editions). At each position, prefers English titles
+    (by character set), then picks the entry with the highest
+    ratings_count.
 
     Returns list of {position, title, author, hardcover_book_id}.
     """
@@ -466,6 +500,8 @@ def dedup_series_books(raw_entries: list[dict]) -> list[dict]:
             continue
         pos = entry.get("position")
         if pos is None:
+            continue
+        if _is_editorial_variant(entry.get("title", "")):
             continue
 
         existing = by_position.get(pos)
