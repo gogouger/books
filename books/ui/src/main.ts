@@ -38,9 +38,10 @@ initThemeToggle();
         if (me) setUser(me);
     }
 
-    // Series overview is the default landing (no hash); the flat
-    // library view is reachable at #/library and via the Library nav.
-    setDefaultRoute(() => renderSeriesList());
+    // Library is the default landing — flat list grouped by series
+    // (sort=series default, sea-green section headers). The series-tile
+    // overview lives at #/series for browse-by-category.
+    setDefaultRoute(() => renderLibrary());
     addRoute('/book/:id/edit', (p) => renderBookEdit(p));
     addRoute('/book/:id', (p) => renderBookDetail(p));
     addRoute('/series', () => renderSeriesList());
