@@ -29,7 +29,7 @@ import asyncio
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
-from books.helpers import hardcover
+from books.helpers import hardcover, openlibrary
 from books.helpers import db as books_db
 
 
@@ -85,6 +85,70 @@ async def link_stage(
     print(f"[link] {'would link' if dry_run else 'linked'} {linked}")
 
 
+async def _ol_merge_stage(
+    conn: sqlite3.Connection,
+    series_link_id: int,
+    series_name: str,
+    user_id: int,
+    dry_run: bool,
+) -> int:
+    """OpenLibrary fallback merge for a single series.
+
+    Returns the number of new entries added. Only fills gaps — never
+    overrides existing series_entries. Polite 1.5s delay before each
+    OL call at the call site.
+    """
+    existing = conn.execute(
+        "SELECT position, title FROM series_entries "
+        "WHERE series_link_id = ?",
+        (series_link_id,),
+    ).fetchall()
+    existing_norms = {
+        hardcover.normalize_title(r["title"]) for r in existing
+    }
+    max_pos = max(
+        (r["position"] for r in existing if r["position"] is not None),
+        default=0.0,
+    )
+
+    # Best-effort: use the first owned author as a filter so OL
+    # doesn't drag in unrelated entries (common with generic series
+    # names like "Hierarchy" or "Drive").
+    author_row = conn.execute(
+        "SELECT authors FROM books "
+        "WHERE user_id = ? AND series_link_id = ? "
+        "AND authors IS NOT NULL LIMIT 1",
+        (user_id, series_link_id),
+    ).fetchone()
+    first_author = None
+    if author_row:
+        first_author = author_row["authors"].split(",")[0].strip()
+
+    ol_entries = await openlibrary.fetch_series_books(
+        series_name, first_author=first_author,
+    )
+
+    added = 0
+    # Position bias: start at max_existing + 0.1 and increment by 0.1
+    # so we never collide with integer canonical positions.
+    next_pos = max_pos + 0.1
+    for entry in ol_entries:
+        norm = hardcover.normalize_title(entry["title"])
+        if norm in existing_norms:
+            continue
+        existing_norms.add(norm)
+        if not dry_run:
+            books_db.insert_series_entry(
+                series_link_id,
+                title=entry["title"],
+                position=next_pos,
+                author=entry.get("author"),
+            )
+        next_pos = round(next_pos + 0.1, 2)
+        added += 1
+    return added
+
+
 async def refresh_stage(
     conn: sqlite3.Connection,
     user_id: int,
@@ -92,6 +156,7 @@ async def refresh_stage(
     only_filter: str | None,
     max_age_days: float,
     force: bool,
+    fallback: str | None,
 ) -> None:
     sql = (
         "SELECT id, series_name, hardcover_series_id, last_checked "
@@ -183,6 +248,27 @@ async def refresh_stage(
             f"-> {len(entries)} entries "
             f"({len(library_books)} matched in library)"
         )
+
+        # OpenLibrary fallback: only fires when HC's canonical count
+        # looks suspiciously low vs what the user owns. Heuristic
+        # picked from the plan: canonical < owned + 2.
+        if fallback == "openlibrary":
+            owned_count = sum(
+                1 for lb in library_books
+                if lb.get("title")
+            )
+            if len(entries) < owned_count + 2:
+                await asyncio.sleep(1.5)
+                added = await _ol_merge_stage(
+                    conn, sid, name, user_id, dry_run,
+                )
+                action = "would add" if dry_run else "added"
+                print(
+                    f"    [OL fallback] {name!r}: "
+                    f"{action} {added} new entries from OpenLibrary"
+                )
+            # else: HC's count is plausible, skip OL.
+
         await asyncio.sleep(0.5)
     print(
         f"[refresh] {'would refresh' if dry_run else 'refreshed'} "
@@ -219,6 +305,15 @@ async def main() -> None:
         action="store_true",
         help="ignore --max-age and refresh everything",
     )
+    ap.add_argument(
+        "--fallback",
+        choices=("openlibrary",),
+        default=None,
+        help=(
+            "after each Hardcover refresh, if the canonical count "
+            "looks low vs owned books, supplement with OpenLibrary"
+        ),
+    )
     args = ap.parse_args()
 
     conn = sqlite3.connect(args.db)
@@ -235,7 +330,7 @@ async def main() -> None:
     if args.stage in ("refresh", "both"):
         await refresh_stage(
             conn, user_id, args.dry_run, args.only,
-            args.max_age, args.force,
+            args.max_age, args.force, args.fallback,
         )
     conn.close()
 
