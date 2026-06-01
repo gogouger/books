@@ -344,17 +344,24 @@ body::before {
     margin: 0 auto;
 }
 
+/* Cover bounding box for book detail. Cap width at 220px and
+   let aspect-ratio: 2/3 set the natural height. object-fit: contain
+   so landscape/square covers display in full without cropping. */
 .book-detail .cover-large {
-    width: var(--cover-width-lg);
-    height: var(--cover-height-lg);
-    object-fit: cover;
+    width: 100%;
+    max-width: 220px;
+    aspect-ratio: 2 / 3;
+    height: auto;
+    object-fit: contain;
+    background-color: var(--bs-secondary-bg);
     border-radius: 8px;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
 }
 
 .book-detail .no-cover-large {
-    width: var(--cover-width-lg);
-    height: var(--cover-height-lg);
+    width: 100%;
+    max-width: 220px;
+    aspect-ratio: 2 / 3;
     background-color: var(--bs-secondary-bg);
     border-radius: 8px;
     display: flex;
@@ -364,11 +371,13 @@ body::before {
     font-size: 5rem;
 }
 
-/* Owner-only cover upload overlay (drag/drop + click-to-pick). */
+/* Owner-only cover upload overlay (drag/drop + click-to-pick).
+   Match the cover-large bounding box (max 220px, aspect 2/3). */
 .book-detail .cover-edit-wrap {
     position: relative;
-    width: var(--cover-width-lg);
-    height: var(--cover-height-lg);
+    width: 100%;
+    max-width: 220px;
+    aspect-ratio: 2 / 3;
     cursor: pointer;
 }
 
@@ -470,11 +479,13 @@ body::before {
     transform: translateY(-2px);
 }
 
-/* Cover banner on series cards — first book in the series */
+/* Cover banner on series cards — first book in the series.
+   Use aspect-ratio: 2/3 to match book-cover proportions so
+   object-fit: cover doesn't crop the top/bottom. */
 .series-cover-wrap {
     position: relative;
     width: 100%;
-    height: 180px;
+    aspect-ratio: 2 / 3;
     overflow: hidden;
     background-color: var(--bs-secondary-bg);
 }
@@ -503,7 +514,10 @@ body::before {
 .series-cover-img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    /* contain (not cover) so weird-ratio covers — landscape /
+       square — show in full without crop. With aspect-ratio: 2/3
+       on the wrap, standard 2:3 covers still fill the container. */
+    object-fit: contain;
     display: block;
 }
 
@@ -792,8 +806,9 @@ body::before {
    scroll, tap targets ≥44px.
    ============================================================ */
 @media (max-width: 575.98px) {
-    /* Series cover banner — drop height so 2-col grid feels balanced. */
-    .series-cover-wrap { height: 140px; }
+    /* Series cover banner — aspect-ratio: 2/3 handles sizing; nothing
+       to override here. (Was a fixed-height before — that crushed the
+       proportions; the aspect-ratio rule does the right thing.) */
 
     /* Card body padding — a touch tighter so two-up reads neatly. */
     .series-card .card-body { padding: 0.5rem 0.6rem; }
