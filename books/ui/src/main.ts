@@ -5,7 +5,7 @@ import { initThemeToggle } from './theme';
 import { renderLogin, updateNavbar } from './pages/login';
 import { renderLibrary, resetLibraryFilters } from './pages/library';
 import { renderBookDetail } from './pages/book-detail';
-import { renderSeriesList, resetSeriesFilters } from './pages/series-list';
+import { resetSeriesFilters } from './pages/series-list';
 import { renderSeriesView } from './pages/series-view';
 import { renderSeriesEdit } from './pages/series-edit';
 import { renderAddBook } from './pages/add-book';
