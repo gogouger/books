@@ -2426,6 +2426,10 @@ def get_series_entry_counts(
     otherwise. `ghost` is the number of entries the user
     doesn't have a book for. Counts effective-linked
     entries only (integer-position entries unless overridden).
+
+    Filters out unreleased "Untitled X #N" placeholders so
+    series totals reflect what's actually publishable and
+    don't render as ghost cards in the UI.
     """
     conn = get_db()
     rows = conn.execute(
@@ -2454,6 +2458,7 @@ def get_series_entry_counts(
                ON ues.series_entry_id = se.id
                AND ues.user_id = ?
            WHERE {_EFFECTIVE_STATUS} = 'linked'
+               AND LOWER(se.title) NOT LIKE 'untitled%'
            GROUP BY se.series_link_id""",
         (user_id, user_id),
     ).fetchall()
@@ -2480,6 +2485,11 @@ def get_series_ghost_entries(
     series_index/position or normalized title+author). One
     dict per ghost with fields {position, title, author,
     hardcover_book_id}.
+
+    Filters out unreleased "Untitled X #N" placeholders so
+    they don't render as ghost cards. They stay in the DB
+    so when Hardcover catalogs the real title, they re-emerge
+    with their actual name.
     """
     conn = get_db()
     rows = conn.execute(
@@ -2491,6 +2501,7 @@ def get_series_ghost_entries(
                AND ues.user_id = ?
            WHERE se.series_link_id = ?
                AND {_EFFECTIVE_STATUS} = 'linked'
+               AND LOWER(se.title) NOT LIKE 'untitled%'
                AND NOT EXISTS (
                    SELECT 1 FROM books b
                    WHERE b.user_id = ?
@@ -2522,6 +2533,9 @@ def get_ghost_entries_for_user(
     Used for the library flat-list ghost overlay. Returns
     dicts shaped like book records so the frontend can
     render them through the same grid component.
+
+    Filters out unreleased "Untitled X #N" placeholders so
+    they don't pollute the flat-list overlay.
     """
     conn = get_db()
     rows = conn.execute(
@@ -2538,6 +2552,7 @@ def get_ghost_entries_for_user(
                ON ues.series_entry_id = se.id
                AND ues.user_id = ?
            WHERE {_EFFECTIVE_STATUS} = 'linked'
+               AND LOWER(se.title) NOT LIKE 'untitled%'
                AND EXISTS (
                    SELECT 1 FROM books b
                    WHERE b.user_id = ?
