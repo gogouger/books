@@ -116,6 +116,36 @@ function renderEditPage(
                     </tbody>
                 </table>
             </div>
+
+            <div class="mt-3">
+                <button class="btn btn-outline-primary btn-sm" id="add-entry-btn">
+                    <i class="bi bi-plus-lg"></i> Add entry
+                </button>
+                <div id="add-entry-form" class="d-none mt-2 p-3 border rounded bg-light">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-auto">
+                            <label class="form-label small mb-0">Position</label>
+                            <input type="number" class="form-control form-control-sm"
+                                   id="new-entry-position" step="0.1" style="width: 90px;">
+                        </div>
+                        <div class="col">
+                            <label class="form-label small mb-0">Title</label>
+                            <input type="text" class="form-control form-control-sm"
+                                   id="new-entry-title" placeholder="Book title">
+                        </div>
+                        <div class="col">
+                            <label class="form-label small mb-0">Author (optional)</label>
+                            <input type="text" class="form-control form-control-sm"
+                                   id="new-entry-author">
+                        </div>
+                        <div class="col-auto">
+                            <button class="btn btn-primary btn-sm" id="new-entry-save">Save</button>
+                            <button class="btn btn-outline-secondary btn-sm" id="new-entry-cancel">Cancel</button>
+                        </div>
+                    </div>
+                    <div id="new-entry-error" class="small text-danger mt-1"></div>
+                </div>
+            </div>
         </div>
     `;
 
@@ -159,6 +189,136 @@ function renderEditPage(
             }
         });
     }
+
+    // Add-entry button: reveal inline form
+    const addEntryBtn = document.getElementById('add-entry-btn') as HTMLButtonElement | null;
+    const addForm = document.getElementById('add-entry-form') as HTMLElement | null;
+    if (addEntryBtn && addForm) {
+        addEntryBtn.addEventListener('click', () => {
+            addForm.classList.remove('d-none');
+            addEntryBtn.classList.add('d-none');
+            // Default new position = (max existing) + 1
+            const positions = entries.map(e => e.position).filter(p => Number.isFinite(p));
+            const nextPos = positions.length ? Math.floor(Math.max(...positions)) + 1 : 1;
+            const posInput = document.getElementById('new-entry-position') as HTMLInputElement;
+            const titleInput = document.getElementById('new-entry-title') as HTMLInputElement;
+            posInput.value = String(nextPos);
+            titleInput.value = '';
+            (document.getElementById('new-entry-author') as HTMLInputElement).value = '';
+            (document.getElementById('new-entry-error') as HTMLElement).textContent = '';
+            titleInput.focus();
+        });
+
+        document.getElementById('new-entry-cancel')!.addEventListener('click', () => {
+            addForm.classList.add('d-none');
+            addEntryBtn.classList.remove('d-none');
+        });
+
+        document.getElementById('new-entry-save')!.addEventListener('click', async () => {
+            const titleInput = document.getElementById('new-entry-title') as HTMLInputElement;
+            const posInput = document.getElementById('new-entry-position') as HTMLInputElement;
+            const authorInput = document.getElementById('new-entry-author') as HTMLInputElement;
+            const errEl = document.getElementById('new-entry-error') as HTMLElement;
+
+            const title = titleInput.value.trim();
+            const position = parseFloat(posInput.value);
+            if (!title) {
+                errEl.textContent = 'Title is required.';
+                return;
+            }
+            if (!Number.isFinite(position)) {
+                errEl.textContent = 'Position must be a number.';
+                return;
+            }
+            const saveBtn = document.getElementById('new-entry-save') as HTMLButtonElement;
+            saveBtn.disabled = true;
+            try {
+                await api.addSeriesEntry(username, seriesId, {
+                    title,
+                    position,
+                    author: authorInput.value.trim() || null,
+                });
+                invalidateSeriesCache();
+                // Reload page with fresh entries
+                const fresh = await api.getSeriesEdit(username, seriesId);
+                renderEditPage(app, fresh, username, seriesId);
+                showAlert(`Added "${title}" as #${position}.`, 'success');
+            } catch (err: any) {
+                errEl.textContent = err.message || 'Failed to add entry.';
+                saveBtn.disabled = false;
+            }
+        });
+    }
+
+    // Ghost-entry inline title edit
+    app.querySelectorAll('tr[data-ghost="1"]').forEach(row => {
+        const tr = row as HTMLElement;
+        const entryId = parseInt(tr.getAttribute('data-entry-id')!);
+        const viewEl = tr.querySelector('.ghost-entry-view') as HTMLElement;
+        const editEl = tr.querySelector('.ghost-entry-edit') as HTMLElement;
+        const titleSpan = tr.querySelector('.ghost-entry-title-text') as HTMLElement;
+        const titleInput = tr.querySelector('.ghost-entry-title-input') as HTMLInputElement;
+        const saveBtn = tr.querySelector('.ghost-entry-title-save') as HTMLButtonElement;
+        const cancelBtn = tr.querySelector('.ghost-entry-title-cancel') as HTMLButtonElement;
+        const deleteBtn = tr.querySelector('.ghost-entry-delete') as HTMLButtonElement;
+
+        if (titleSpan) {
+            titleSpan.addEventListener('click', () => {
+                viewEl.classList.add('d-none');
+                editEl.classList.remove('d-none');
+                titleInput.focus();
+                titleInput.select();
+            });
+        }
+
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => {
+                titleInput.value = titleSpan.textContent || '';
+                editEl.classList.add('d-none');
+                viewEl.classList.remove('d-none');
+            });
+        }
+
+        if (saveBtn) {
+            saveBtn.addEventListener('click', async () => {
+                const newTitle = titleInput.value.trim();
+                if (!newTitle) {
+                    showAlert('Title cannot be empty.', 'danger');
+                    return;
+                }
+                saveBtn.disabled = true;
+                try {
+                    await api.updateSeriesEntry(username, entryId, { title: newTitle });
+                    invalidateSeriesCache();
+                    titleSpan.textContent = newTitle;
+                    editEl.classList.add('d-none');
+                    viewEl.classList.remove('d-none');
+                    showAlert('Entry updated.', 'success');
+                } catch (err: any) {
+                    showAlert(`Update failed: ${escapeHtml(err.message)}`, 'danger');
+                } finally {
+                    saveBtn.disabled = false;
+                }
+            });
+        }
+
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', async () => {
+                const title = titleSpan?.textContent || 'this entry';
+                if (!window.confirm(`Delete "${title}"?`)) return;
+                deleteBtn.disabled = true;
+                try {
+                    await api.deleteSeriesEntry(username, entryId);
+                    invalidateSeriesCache();
+                    tr.remove();
+                    showAlert(`Deleted "${title}".`, 'success');
+                } catch (err: any) {
+                    showAlert(`Delete failed: ${escapeHtml(err.message)}`, 'danger');
+                    deleteBtn.disabled = false;
+                }
+            });
+        }
+    });
 
     // Save button
     document.getElementById('save-btn')!.addEventListener('click', async () => {
@@ -222,6 +382,7 @@ function renderEntryRow(entry: SeriesEntry): string {
         ? entry.book_ignored === 1
         : entry.entry_status === 'ignored';
     const ignoredClass = isIgnored ? ' series-entry-ignored' : '';
+    const isGhost = !entry.book_id;
 
     // Book info (left column)
     let bookHtml: string;
@@ -253,19 +414,45 @@ function renderEntryRow(entry: SeriesEntry): string {
         bookHtml = '<span class="text-muted small">No linked book</span>';
     }
 
-    // HC reference (right column)
-    const hcHtml = `
-        <div class="small">
-            <span class="text-muted">#${entry.position}</span>
-            ${escapeHtml(entry.hc_title)}
-        </div>
-        <div class="small text-muted">${escapeHtml(entry.hc_author || '')}</div>
-    `;
+    // HC reference (right column): ghost-only rows get inline edit + delete
+    let hcHtml: string;
+    if (isGhost) {
+        hcHtml = `
+            <div class="ghost-entry-view">
+                <div class="small">
+                    <span class="text-muted">#${entry.position}</span>
+                    <span class="ghost-entry-title-text" role="button" title="Click to edit">${escapeHtml(entry.hc_title)}</span>
+                    <button class="btn btn-link btn-sm p-0 ms-2 text-danger ghost-entry-delete"
+                            title="Delete entry" aria-label="Delete entry">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+                <div class="small text-muted">${escapeHtml(entry.hc_author || '')}</div>
+            </div>
+            <div class="ghost-entry-edit d-none">
+                <div class="d-flex gap-1 align-items-center">
+                    <input type="text" class="form-control form-control-sm ghost-entry-title-input"
+                           value="${escapeAttr(entry.hc_title)}">
+                    <button class="btn btn-primary btn-sm ghost-entry-title-save">Save</button>
+                    <button class="btn btn-outline-secondary btn-sm ghost-entry-title-cancel">Cancel</button>
+                </div>
+            </div>
+        `;
+    } else {
+        hcHtml = `
+            <div class="small">
+                <span class="text-muted">#${entry.position}</span>
+                ${escapeHtml(entry.hc_title)}
+            </div>
+            <div class="small text-muted">${escapeHtml(entry.hc_author || '')}</div>
+        `;
+    }
 
     const bookIdAttr = entry.book_id ? ` data-book-id="${entry.book_id}"` : '';
+    const ghostAttr = isGhost ? ' data-ghost="1"' : '';
 
     return `
-        <tr data-entry-id="${entry.entry_id}"${bookIdAttr} class="${ignoredClass}">
+        <tr data-entry-id="${entry.entry_id}"${bookIdAttr}${ghostAttr} class="${ignoredClass}">
             <td>
                 <input type="number" class="form-control form-control-sm position-input"
                        value="${entry.position}" step="0.1" style="width: 65px;">

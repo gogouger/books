@@ -774,6 +774,25 @@ body::before {
     text-decoration: none;
 }
 
+/* Ghost-entry inline title edit (series-edit page) */
+.ghost-entry-title-text {
+    cursor: pointer;
+    border-bottom: 1px dotted var(--bs-secondary-color);
+}
+
+.ghost-entry-title-text:hover {
+    color: var(--bs-link-color);
+}
+
+.ghost-entry-delete {
+    line-height: 1;
+    vertical-align: baseline;
+}
+
+#add-entry-form {
+    max-width: 100%;
+}
+
 /* Scroll sentinel for infinite scroll */
 #scroll-sentinel {
     min-height: 1px;

@@ -166,6 +166,37 @@ export const api = {
         });
     },
 
+    async addSeriesEntry(
+        username: string,
+        seriesLinkId: number,
+        data: { title: string; position: number; author?: string | null },
+    ): Promise<any> {
+        return apiFetch(`/${username}/series/${seriesLinkId}/entries`, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    },
+
+    async updateSeriesEntry(
+        username: string,
+        entryId: number,
+        data: { title?: string; position?: number; author?: string | null },
+    ): Promise<any> {
+        return apiFetch(`/${username}/series/entries/${entryId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(data),
+        });
+    },
+
+    async deleteSeriesEntry(
+        username: string,
+        entryId: number,
+    ): Promise<any> {
+        return apiFetch(`/${username}/series/entries/${entryId}`, {
+            method: 'DELETE',
+        });
+    },
+
     async refreshMetadata(username: string, bookId: number): Promise<any> {
         return apiFetch(`/${username}/books/${bookId}/refresh-metadata`, {
             method: 'POST',
