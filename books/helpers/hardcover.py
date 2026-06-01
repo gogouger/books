@@ -364,7 +364,7 @@ async def fetch_series_books(series_id: int) -> list[dict]:
     Returns the raw list of all entries (including translations,
     compilations, etc.) without deduplication. Each entry has:
     {position, title, author, hardcover_book_id, featured,
-     compilation, ratings_count}.
+     compilation, ratings_count, cover_url}.
     """
     query = """
     {
@@ -380,6 +380,7 @@ async def fetch_series_books(series_id: int) -> list[dict]:
           book {
             id
             title
+            image { url }
             contributions {
               author { name }
             }
@@ -410,6 +411,11 @@ async def fetch_series_books(series_id: int) -> list[dict]:
             for c in book.get("contributions", [])
             if c.get("author", {}).get("name")
         ]
+        image = book.get("image") or {}
+        cover_url = image.get("url") if isinstance(image, dict) else None
+        # Treat empty string as missing.
+        if not cover_url:
+            cover_url = None
         entries.append({
             "position": bs.get("position"),
             "title": book.get("title", ""),
@@ -418,6 +424,7 @@ async def fetch_series_books(series_id: int) -> list[dict]:
             "featured": bool(bs.get("featured")),
             "compilation": bool(bs.get("compilation")),
             "ratings_count": book.get("ratings_count", 0),
+            "cover_url": cover_url,
         })
 
     return entries
@@ -584,6 +591,7 @@ def dedup_series_books(raw_entries: list[dict]) -> list[dict]:
             "title": r["title"],
             "author": r.get("author", ""),
             "hardcover_book_id": r.get("hardcover_book_id"),
+            "cover_url": r.get("cover_url"),
         }
         for r in result
     ]

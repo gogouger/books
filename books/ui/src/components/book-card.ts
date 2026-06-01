@@ -85,10 +85,18 @@ export function ghostCardHtml(book: any): string {
     }
     const addHref = `#/add?${params.toString()}`;
 
+    // Prefer the Hardcover cover URL on ghost entries when we have
+    // one (loads directly from their CDN, no proxy needed). Falls
+    // back to the placeholder icon when cover_url is null/empty.
+    const coverInner = book.cover_url
+        ? `<img src="${escapeAttr(book.cover_url)}"
+                alt="${escapeHtml(book.title || '')}" loading="lazy">`
+        : `<div class="no-cover"><i class="bi bi-plus-circle"></i></div>`;
+
     return `
         <div class="book-card card ghost-card" data-add-href="${escapeAttr(addHref)}" role="button" title="Add to library">
             <div class="cover-container ghost-cover">
-                <div class="no-cover"><i class="bi bi-plus-circle"></i></div>
+                ${coverInner}
                 <span class="ghost-badge">Not in library</span>
             </div>
             <div class="card-info">

@@ -240,6 +240,7 @@ def init_db() -> None:
     _migrate_book_format()
     _migrate_review()
     _migrate_manual_category()
+    _migrate_series_entries_cover_url()
     log.info("Database initialized at %s", DB_PATH)
 
 
@@ -670,6 +671,31 @@ def _migrate_manual_category() -> None:
     log.info("Adding manual_category column to books")
     conn.execute(
         "ALTER TABLE books ADD COLUMN manual_category TEXT"
+    )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_series_entries_cover_url() -> None:
+    """Add cover_url column to series_entries (for ghost cards).
+
+    Stores the Hardcover CDN image URL for each series entry so
+    ghost cards (series books the user doesn't own) can render
+    an actual cover instead of a generic placeholder.
+    """
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(series_entries)"
+        ).fetchall()
+    ]
+    if "cover_url" in columns:
+        conn.close()
+        return
+    log.info("Adding cover_url column to series_entries")
+    conn.execute(
+        "ALTER TABLE series_entries ADD COLUMN cover_url TEXT"
     )
     conn.commit()
     conn.close()
@@ -2434,7 +2460,7 @@ def get_series_ghost_entries(
     conn = get_db()
     rows = conn.execute(
         f"""SELECT se.position, se.title, se.author,
-                  se.hardcover_book_id
+                  se.hardcover_book_id, se.cover_url
            FROM series_entries se
            LEFT JOIN user_entry_status ues
                ON ues.series_entry_id = se.id
@@ -2480,7 +2506,8 @@ def get_ghost_entries_for_user(
                   se.author as authors,
                   se.series_link_id,
                   sl.series_name as series,
-                  se.hardcover_book_id
+                  se.hardcover_book_id,
+                  se.cover_url
            FROM series_entries se
            JOIN series_link sl ON sl.id = se.series_link_id
            LEFT JOIN user_entry_status ues
@@ -2525,6 +2552,7 @@ def get_ghost_entries_for_user(
             "series_index": r["series_index"],
             "hardcover_book_id": r["hardcover_book_id"],
             "cover_filename": None,
+            "cover_url": r["cover_url"],
             "user_id": user_id,
             "is_owned": 0,
             "reading_status": "unread",
@@ -3113,19 +3141,25 @@ def upsert_series_entries(
             if hc_id else None
         )
 
+        cover_url = entry.get("cover_url")
+        if cover_url == "":
+            cover_url = None
+
         if existing_id:
             seen_ids.add(existing_id)
             conn.execute(
                 """UPDATE series_entries
                    SET position = ?, title = ?,
                        author = ?,
-                       hardcover_book_id = ?
+                       hardcover_book_id = ?,
+                       cover_url = ?
                    WHERE id = ?""",
                 (
                     entry["position"],
                     entry["title"],
                     entry.get("author"),
                     hc_id,
+                    cover_url,
                     existing_id,
                 ),
             )
@@ -3133,14 +3167,15 @@ def upsert_series_entries(
             cursor = conn.execute(
                 """INSERT INTO series_entries
                    (series_link_id, position, title,
-                    author, hardcover_book_id)
-                   VALUES (?, ?, ?, ?, ?)""",
+                    author, hardcover_book_id, cover_url)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
                 (
                     series_link_id,
                     entry["position"],
                     entry["title"],
                     entry.get("author"),
                     entry.get("hardcover_book_id"),
+                    cover_url,
                 ),
             )
             seen_ids.add(cursor.lastrowid)
