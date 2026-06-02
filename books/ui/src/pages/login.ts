@@ -32,11 +32,13 @@ export function updateNavbar(): void {
     const navSignin = document.getElementById('nav-signin')!;
     const navMyLibrary = document.getElementById('nav-my-library')!;
     const navAddItem = document.getElementById('nav-add-item')!;
+    const navScanItem = document.getElementById('nav-scan-item')!;
 
     // Reset visibility
     navLinks.style.display = 'none';
     navUser.style.display = 'none';
     navAddItem.style.display = 'none';
+    navScanItem.style.display = 'none';
     navUsername.textContent = '';
     navLogout.classList.add('d-none');
     navSignin.classList.add('d-none');
@@ -75,6 +77,7 @@ export function updateNavbar(): void {
     if (isOwner) {
         // Owner or superuser: full controls
         navAddItem.style.display = '';
+        navScanItem.style.display = '';
         navUsername.textContent = user.display_name;
         navLogout.classList.remove('d-none');
         navLogout.onclick = (e) => {

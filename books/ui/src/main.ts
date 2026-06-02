@@ -9,6 +9,7 @@ import { renderSeriesView } from './pages/series-view';
 import { renderSeriesEdit } from './pages/series-edit';
 import { renderAddBook } from './pages/add-book';
 import { renderBookEdit } from './pages/book-edit';
+import { renderScanBooks } from './pages/scan';
 
 initThemeToggle();
 
@@ -54,6 +55,7 @@ initThemeToggle();
     addRoute('/series/:id', (p) => renderSeriesView(p));
     addRoute('/library', (p) => renderLibrary(p));
     addRoute('/add', (p) => renderAddBook(p));
+    addRoute('/scan', (_p) => renderScanBooks());
 
     bootstrapAuth();
     updateNavbar();
