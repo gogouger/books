@@ -26,6 +26,13 @@ type AddedBook = {
 const RECENT_MAX = 20;
 const recentlyAdded: AddedBook[] = [];
 
+// Camera scanner state
+let videoStream: MediaStream | null = null;
+let detectionRafId: number | null = null;
+let lastDetectedValue = '';
+let lastDetectedAt = 0;
+let scannerBusy = false;   // skip detection while a lookup is in-flight
+
 function getStickyCategory(): 'Religious' | 'Fiction' {
     const stored = localStorage.getItem('scan_category');
     return stored === 'Fiction' ? 'Fiction' : 'Religious';
@@ -185,21 +192,131 @@ async function lookupAndAdd(rawIsbn: string): Promise<void> {
     }
 }
 
+async function startCamera(): Promise<void> {
+    const SupportedDetector = (window as any).BarcodeDetector;
+    if (!SupportedDetector) {
+        setStatus('Your browser does not have BarcodeDetector. Use the ISBN box below.', 'error');
+        return;
+    }
+    try {
+        videoStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: 'environment' } },
+            audio: false,
+        });
+    } catch (e: any) {
+        setStatus(`Camera blocked: ${e?.message || e}. Use the ISBN box below.`, 'error');
+        return;
+    }
+    const video = document.getElementById('scan-video') as HTMLVideoElement;
+    video.srcObject = videoStream;
+    await video.play().catch(() => {});
+    video.style.display = '';
+
+    document.getElementById('camera-start')?.classList.add('d-none');
+    document.getElementById('camera-stop')?.classList.remove('d-none');
+    setStatus('Camera live — point at the back-cover barcode.', 'info');
+
+    const detector = new SupportedDetector({ formats: ['ean_13'] });
+    const tick = async () => {
+        if (!videoStream || video.readyState < 2) {
+            detectionRafId = requestAnimationFrame(tick);
+            return;
+        }
+        if (scannerBusy) {
+            detectionRafId = requestAnimationFrame(tick);
+            return;
+        }
+        try {
+            const codes = await detector.detect(video);
+            for (const code of codes) {
+                const value = String(code.rawValue || '');
+                // Debounce identical detections so a held-still barcode doesn't
+                // get added twice while it sits in frame.
+                if (value === lastDetectedValue && Date.now() - lastDetectedAt < 3500) continue;
+                if (!isValidIsbn(value)) continue;
+                lastDetectedValue = value;
+                lastDetectedAt = Date.now();
+                scannerBusy = true;
+                // Flash visual feedback
+                video.style.outline = '4px solid #198754';
+                setTimeout(() => { video.style.outline = ''; }, 280);
+                await lookupAndAdd(value);
+                scannerBusy = false;
+                break;
+            }
+        } catch {
+            // BarcodeDetector throws when frame isn't ready; just keep going.
+        }
+        if (videoStream) {
+            detectionRafId = requestAnimationFrame(tick);
+        }
+    };
+    tick();
+}
+
+function stopCamera(): void {
+    if (videoStream) {
+        videoStream.getTracks().forEach((t) => t.stop());
+        videoStream = null;
+    }
+    if (detectionRafId !== null) {
+        cancelAnimationFrame(detectionRafId);
+        detectionRafId = null;
+    }
+    const video = document.getElementById('scan-video') as HTMLVideoElement | null;
+    if (video) {
+        video.srcObject = null;
+        video.style.display = 'none';
+    }
+    document.getElementById('camera-start')?.classList.remove('d-none');
+    document.getElementById('camera-stop')?.classList.add('d-none');
+    setStatus('Camera stopped.', 'info');
+}
+
 export function renderScanBooks(): void {
     const app = document.getElementById('app')!;
     if (!isOwner()) { navigateHome(); return; }
 
     const cat = getStickyCategory();
     const fmt = getStickyFormat();
+    const detectorSupported = 'BarcodeDetector' in window;
 
     app.innerHTML = `
       <div style="max-width: 640px; margin: 0 auto;">
         <h4 class="mb-1">Scan / Add by ISBN</h4>
         <p class="text-muted small mb-3">
-          Paste or type an ISBN-10 or ISBN-13 (with or without dashes).
-          The book gets looked up and added to your library with the
-          category + format below. A camera barcode scanner is on the way.
+          Use the camera scanner to point at the back-cover barcode, or paste an
+          ISBN below. Either way the book gets looked up and added with the
+          category + format you've set.
         </p>
+
+        <div class="card mb-3">
+          <div class="card-body">
+            <h6 class="mb-2"><i class="bi bi-camera-fill me-1"></i>Camera</h6>
+            ${detectorSupported
+                ? `<video id="scan-video" autoplay playsinline muted
+                          style="display:none; width:100%; max-height:340px; background:#000;
+                                 border-radius:6px; transition:outline 80ms ease;"></video>
+                   <div class="d-flex gap-2 align-items-center">
+                     <button class="btn btn-primary" id="camera-start" type="button">
+                       <i class="bi bi-play-fill me-1"></i>Start camera
+                     </button>
+                     <button class="btn btn-outline-secondary d-none" id="camera-stop" type="button">
+                       <i class="bi bi-stop-fill me-1"></i>Stop
+                     </button>
+                   </div>
+                   <p class="small text-muted mt-2 mb-0">
+                     Best on a phone — hold the back cover ~6 inches from the lens.
+                     Detected ISBNs auto-submit. You can keep scanning until you stop.
+                   </p>`
+                : `<p class="small text-muted mb-0">
+                     Your browser doesn't support the BarcodeDetector API.
+                     Camera scanning works on iOS Safari 17+, Chrome / Edge on
+                     Android, and Chrome / Edge on desktop. Use the ISBN paste
+                     below instead.
+                   </p>`}
+          </div>
+        </div>
 
         <div class="card mb-3">
           <div class="card-body">
@@ -259,4 +376,17 @@ export function renderScanBooks(): void {
     inp.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') { e.preventDefault(); submit(); }
     });
+
+    // Camera scanner controls
+    document.getElementById('camera-start')?.addEventListener('click', () => { startCamera(); });
+    document.getElementById('camera-stop')?.addEventListener('click', () => { stopCamera(); });
+
+    // Stop the camera if the user navigates away from /scan (any hash change).
+    const offHashChange = () => {
+        if (!window.location.hash.includes('/scan')) {
+            stopCamera();
+            window.removeEventListener('hashchange', offHashChange);
+        }
+    };
+    window.addEventListener('hashchange', offHashChange);
 }
