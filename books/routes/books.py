@@ -1205,6 +1205,44 @@ async def add_book_from_preview(
         sort_title = db.make_sort_title(book_title)
         now = datetime.now(timezone.utc).isoformat()
 
+        # Hardcover series enrichment for manual-mode adds (typically /scan).
+        # Google Books / Open Library — the initial metadata sources — have
+        # weak series coverage, especially for SFF and theology. When the
+        # caller didn't supply a series, ask Hardcover before we INSERT so
+        # the book lands in its cluster on first render. Non-fatal: any
+        # Hardcover error just leaves req.series untouched and the weekly
+        # sync-series cron will pick it up later.
+        if req.manual and not req.series:
+            try:
+                first_author = (
+                    book_authors.split(",", 1)[0]
+                    if book_authors else ""
+                ).strip()
+                hc_q = f"{book_title} {first_author}".strip()
+                hc_hits = await hardcover.search_books(hc_q, per_page=5)
+                nt = (book_title or "").lower().strip()
+                na = first_author.lower().strip()
+                for r in hc_hits:
+                    rt = (r.get("title") or "").lower().strip()
+                    ra = (r.get("author") or "").lower().strip()
+                    if rt == nt and (not na or na in ra or ra in na):
+                        det = await hardcover.fetch_book_detail(r["id"])
+                        if det and det.get("series_name"):
+                            req.series = det["series_name"].strip()
+                            if req.series_index is None:
+                                req.series_index = det.get("series_index")
+                            log.info(
+                                "Hardcover enriched %r → %r #%s",
+                                book_title, req.series,
+                                req.series_index,
+                            )
+                        break
+            except Exception as e:
+                log.warning(
+                    "Hardcover series enrichment failed for %r: %s",
+                    book_title, e,
+                )
+
         series_link_id = None
         if req.series:
             series_link_id = (
