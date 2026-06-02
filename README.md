@@ -303,3 +303,11 @@ One-time import from existing Calibre libraries:
 ```bash
 python scripts/import_calibre.py --db /path/to/calibre/metadata.db
 ```
+
+## Deployed as Athenaeum
+
+This codebase is deployed publicly as **Athenaeum** at <https://books.gordongouger.com> behind Authelia SSO. Anonymous visitors can browse the library read-only; mutations + file downloads require login. The production wiring lives in [gogouger/infra](https://github.com/gogouger/infra).
+
+## License
+
+[MIT](LICENSE). Borrow, fork, ship your own. Personal reading data is yours alone — none of it is in this repo.
