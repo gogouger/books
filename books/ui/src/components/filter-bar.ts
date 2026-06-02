@@ -39,6 +39,7 @@ const DEFAULT_FILTER_OPTIONS: FilterOption[] = [
     { value: '_hr2', label: '', hr: true },
     { value: 'owned', label: 'Owned' },
     { value: 'unowned', label: 'Unowned' },
+    { value: 'no_ghosts', label: 'Hide series gaps' },
     { value: '_hr3', label: '', hr: true },
     { value: 'favorites', label: 'Favorites' },
     { value: '1star', label: '1 star' },

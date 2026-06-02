@@ -59,7 +59,10 @@ def _forward_auth_user(request: Request) -> dict | None:
     no Remote-Email header is present so callers can fall back to token auth.
     """
     email = request.headers.get("Remote-Email", "").strip().lower()
-    if not email:
+    # Defensive: reject literal Caddy placeholder leaks ({http.reverse_proxy...})
+    # and anything that doesn't look like an email. Prevents phantom user creation
+    # if the proxy ever forwards a placeholder string instead of an actual address.
+    if not email or "@" not in email or "{" in email or " " in email:
         return None
     username = _load_users().get(email) or email.split("@", 1)[0].lower()
     user = get_user_by_username(username)

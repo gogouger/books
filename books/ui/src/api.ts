@@ -26,7 +26,8 @@ export async function apiFetch(
         const refreshed = await showLoginPrompt();
         if (!refreshed) {
             clearAuth();
-            window.location.href = '/';
+            // Do NOT redirect to "/" — Caddy redirects "/" back to "/{username}/"
+            // which re-triggers this 401 path on anonymous endpoints. Loop.
             throw new Error('Not authenticated');
         }
         // Retry with new token
@@ -74,7 +75,8 @@ async function apiFetchRaw(
         const refreshed = await showLoginPrompt();
         if (!refreshed) {
             clearAuth();
-            window.location.href = '/';
+            // Do NOT redirect to "/" — Caddy redirects "/" back to "/{username}/"
+            // which re-triggers this 401 path on anonymous endpoints. Loop.
             throw new Error('Not authenticated');
         }
         // Retry with new token

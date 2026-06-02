@@ -120,7 +120,7 @@ def list_books(
     rated: bool | None = None,
     sort: str = "title",
     order: str = "asc",
-    limit: int = Query(default=50, le=200),
+    limit: int = Query(default=50, le=1000),
     offset: int = 0,
     include_ghosts: bool = False,
     group_by_series: bool | None = None,

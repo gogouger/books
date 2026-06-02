@@ -55,7 +55,8 @@ function scheduleTokenRefresh(token: string): void {
     const timeUntilExpiry = exp * 1000 - Date.now() - 5 * 60 * 1000;
     if (timeUntilExpiry <= 0) {
         clearAuth();
-        window.location.href = '/';
+        // Expired Google ID token — let SSO take over on the next request.
+        // Do NOT redirect to "/" (causes Caddy → /{username}/ → here loop).
         return;
     }
     tokenRefreshTimeout = setTimeout(() => { trySilentRefresh(); }, timeUntilExpiry);
@@ -88,6 +89,11 @@ export function getUser(): any | null {
 }
 
 export function setUser(user: any): void {
+    // Sanitize: a Caddy placeholder leak ({http.reverse_proxy.header.X}) used
+    // to land in display_name. Strip those out so they never reach the navbar.
+    if (user && typeof user.display_name === 'string' && user.display_name.indexOf('{') !== -1) {
+        user.display_name = user.username || 'me';
+    }
     localStorage.setItem('books_user', JSON.stringify(user));
 }
 

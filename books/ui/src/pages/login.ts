@@ -1,4 +1,5 @@
 import { getUser, clearAuth, renderGoogleButton } from '../auth';
+import { openSignInModal } from '../auth-modal';
 import { getLibraryUsername } from '../context';
 
 export function renderLogin(): void {
@@ -8,7 +9,7 @@ export function renderLogin(): void {
             <div class="card shadow-sm">
                 <div class="card-body p-4">
                     <h3 class="text-center mb-4">
-                        <i class="bi bi-book"></i> Books
+                        <i class="bi bi-bookshelf"></i> Athenaeum
                     </h3>
                     <div id="login-error" class="alert alert-danger d-none"></div>
                     <div id="google-signin-button" class="d-flex justify-content-center"></div>
@@ -50,8 +51,15 @@ export function updateNavbar(): void {
             navLogout.classList.remove('d-none');
             navLogout.onclick = (e) => {
                 e.preventDefault();
-                clearAuth();
-                window.location.href = '/';
+                fetch('/__authlogout', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: '{}',
+                }).catch(() => {}).finally(() => {
+                    clearAuth();
+                    window.location.href = '/';
+                });
             };
         }
         // Not logged in at root: hide everything (login page handles itself)
@@ -71,8 +79,17 @@ export function updateNavbar(): void {
         navLogout.classList.remove('d-none');
         navLogout.onclick = (e) => {
             e.preventDefault();
-            clearAuth();
-            window.location.href = '/';
+            // Tell Authelia to actually clear the session cookie before
+            // clearing local state — otherwise SSO silently re-logs us in.
+            fetch('/__authlogout', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: '{}',
+            }).catch(() => {}).finally(() => {
+                clearAuth();
+                window.location.href = '/';
+            });
         };
         // If superuser viewing another library, also show link to own
         if (user.username !== libraryUser) {
@@ -87,11 +104,28 @@ export function updateNavbar(): void {
         navLogout.classList.remove('d-none');
         navLogout.onclick = (e) => {
             e.preventDefault();
-            clearAuth();
-            window.location.href = '/';
+            // Tell Authelia to actually clear the session cookie before
+            // clearing local state — otherwise SSO silently re-logs us in.
+            fetch('/__authlogout', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: '{}',
+            }).catch(() => {}).finally(() => {
+                clearAuth();
+                window.location.href = '/';
+            });
         };
     } else {
-        // Anonymous visitor: read-only, show sign-in link
+        // Anonymous visitor: read-only, show sign-in link that opens the
+        // inline modal (no separate Authelia portal page). Falls back to the
+        // portal URL for users without JS via the href attribute.
+        const rd = encodeURIComponent(window.location.href);
+        navSignin.href = `https://auth.gordongouger.com/?rd=${rd}`;
+        navSignin.onclick = (e) => {
+            e.preventDefault();
+            openSignInModal();
+        };
         navSignin.classList.remove('d-none');
     }
 }

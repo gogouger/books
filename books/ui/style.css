@@ -957,3 +957,27 @@ body::before {
     /* Make all .btn-sm comfortably tappable. */
     .book-detail .btn-sm { padding: 0.4rem 0.7rem; }
 }
+
+/* card-status (Athenaeum) — small text badge below the title spelling out
+   what the colored gutter is implying. Belt-and-suspenders so visitors don't
+   have to guess what "slightly greyed out cover" means. */
+.card-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.68rem;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-top: 6px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    line-height: 1.4;
+}
+.card-status .bi { font-size: 0.78rem; line-height: 1; }
+.status-read       { background:#d6f0df; color:#0b5532; }
+.status-reading    { background:#dfe9ff; color:#1742a0; }
+.status-not-owned  { background:transparent; color:#8a5a1f; border:1px dashed #c0a37a; }
+[data-bs-theme=dark] .status-read       { background:#193a26; color:#7adfa1; }
+[data-bs-theme=dark] .status-reading    { background:#1b2748; color:#9fbcff; }
+[data-bs-theme=dark] .status-not-owned  { color:#d2a76b; border-color:#7a5a32; }

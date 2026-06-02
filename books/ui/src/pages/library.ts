@@ -20,6 +20,7 @@ let currentState: FilterState = {
 };
 
 const PAGE_SIZE = 60;
+const PAGE_SIZE_GROUPED = 1000;
 let pendingAuthorFilter: string | null = null;
 
 // Infinite scroll + cache state.
@@ -30,8 +31,6 @@ let isLoading = false;
 let observer: IntersectionObserver | null = null;
 let lastLoadedState: FilterState | null = null;
 let scrollListener: (() => void) | null = null;
-// When the user toggles ghost-entry overlay off (sticky across loads).
-let hideUnowned = false;
 
 const DEFAULT_STATE: FilterState = {
     q: '',
@@ -158,13 +157,6 @@ function renderShell(): void {
             showCategory: true,
         }) +
         `<div class="mb-2 d-flex gap-3 align-items-center small">
-            <div class="form-check form-switch mb-0">
-                <input class="form-check-input" type="checkbox"
-                       id="hide-unowned-toggle" ${hideUnowned ? 'checked' : ''}>
-                <label class="form-check-label text-muted" for="hide-unowned-toggle">
-                    Hide unowned (ghost entries)
-                </label>
-            </div>
         </div>` +
         '<div id="library-content"></div>' +
         '<div id="scroll-sentinel"></div>';
@@ -191,14 +183,6 @@ function renderShell(): void {
             resetAndReload();
         }
     });
-
-    const ghostToggle = app.querySelector('#hide-unowned-toggle') as HTMLInputElement | null;
-    if (ghostToggle) {
-        ghostToggle.addEventListener('change', () => {
-            hideUnowned = ghostToggle.checked;
-            resetAndReload();
-        });
-    }
 
     setupScrollTracking();
     renderBooksView();
@@ -248,7 +232,7 @@ async function renderBooksView(): Promise<void> {
 function applyClientCategoryFilter(books: any[]): any[] {
     const cat = currentState.category || 'all';
     if (cat === 'all') return books;
-    return books.filter(b => b.category === cat);
+    return books.filter(b => b.manual_category === cat);
 }
 
 async function loadMoreBooks(): Promise<void> {
@@ -294,7 +278,7 @@ async function loadMoreBooks(): Promise<void> {
         const params: Record<string, any> = {
             sort: effectiveSort,
             order: currentState.order,
-            limit: PAGE_SIZE,
+            limit: effectiveSort === 'series' ? PAGE_SIZE_GROUPED : PAGE_SIZE,
             offset: offset,
         };
         if (currentState.q) params.q = currentState.q;
@@ -308,6 +292,9 @@ async function loadMoreBooks(): Promise<void> {
             params.is_owned = true;
         } else if (f === 'unowned') {
             params.is_owned = false;
+        } else if (f === 'no_ghosts') {
+            // explicit "hide series gaps" — leaves owned status unfiltered
+            // but tells the series-grouped code path below to skip ghosts.
         } else if (f === 'favorites') {
             params.is_favorite = true;
         } else if (f.endsWith('star')) {
@@ -318,7 +305,19 @@ async function loadMoreBooks(): Promise<void> {
 
         if (effectiveSort === 'series') {
             params.group_by_series = true;
-            if (!hideUnowned) params.include_ghosts = true;
+            // Ghosts (series gaps you don't have a record for) ride along with grouped-series
+            // by default. They get suppressed automatically when the active filter implies
+            // "show me only what I have" — Owned, Read, Reading, Favorites, or any star rating —
+            // since a ghost has no is_owned / read state to satisfy that filter.
+            const filterHidesGhosts = (
+                currentState.filter === 'owned' ||
+                currentState.filter === 'read' ||
+                currentState.filter === 'reading' ||
+                currentState.filter === 'favorites' ||
+                currentState.filter === 'no_ghosts' ||
+                currentState.filter.endsWith('star')
+            );
+            if (!filterHidesGhosts) params.include_ghosts = true;
         } else if (effectiveSort === 'date_finished') {
             if (!params.reading_status) {
                 params.reading_status = 'read';

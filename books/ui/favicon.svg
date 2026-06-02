@@ -1,5 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <path d="M6 4c-1.1 0-2 .9-2 2v20c0 1.1.9 2 2 2h20c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H6z" fill="#2c3e50"/>
-  <path d="M16 8c-3 0-5.5.8-7 1.5V24c1.5-.7 4-1.5 7-1.5s5.5.8 7 1.5V9.5C21.5 8.8 19 8 16 8z" fill="none" stroke="#e0e0e0" stroke-width="1.5"/>
-  <line x1="16" y1="8" x2="16" y2="22.5" stroke="#e0e0e0" stroke-width="1"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none"
+     stroke="#1a8a77" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Three book spines on a shelf, mirroring the personal-site G monogram's line style. -->
+  <path d="M22 24 L22 76"/>
+  <path d="M37 24 L37 76"/>
+  <path d="M55 32 L55 76"/>
+  <path d="M73 28 L73 76"/>
+  <!-- Shelf -->
+  <path d="M15 80 L85 80"/>
 </svg>

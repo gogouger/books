@@ -42,6 +42,20 @@ export function bookCardHtml(book: any): string {
         ? `<div class="card-progress"><div class="card-progress-fill" style="width:${(book.progress * 100).toFixed(1)}%"></div></div>`
         : '';
 
+    // Status badge — shown below title. The colored gutter on the side
+    // gives a quick scan; this label spells it out so it's not ambiguous.
+    let statusBadge = '';
+    if (book.is_owned === 0) {
+        statusBadge = '<span class="card-status status-not-owned">Don&rsquo;t own</span>';
+    } else if (book.reading_status === 'read') {
+        statusBadge = '<span class="card-status status-read"><i class="bi bi-check-circle-fill"></i> Read</span>';
+    } else if (book.reading_status === 'reading') {
+        const pct = book.progress ? ` ${Math.round(book.progress * 100)}%` : '';
+        statusBadge = `<span class="card-status status-reading"><i class="bi bi-book-half"></i> Reading${pct}</span>`;
+    }
+    // owned + unread = no badge (default state, would be noise on every card)
+
+
     return `
         <div class="book-card card${ownedClass}" data-book-id="${book.id}" role="button">
             <div class="cover-container">
@@ -57,6 +71,7 @@ export function bookCardHtml(book: any): string {
                     <div class="card-title">${escapeHtml(book.title)}</div>
                     <div class="card-author">${authorsHtml(book.authors)}</div>
                     ${seriesInfo}
+                    ${statusBadge}
                 </div>
             </div>
         </div>
