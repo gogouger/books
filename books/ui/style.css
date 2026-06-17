@@ -235,11 +235,7 @@ body::before {
     text-decoration: underline;
 }
 
-/* Not owned books */
-.book-card.not-owned .cover-container {
-    opacity: 0.5;
-}
-
+/* Not owned books — the red "Don't own" pill carries the signal, no dimming. */
 .book-card.not-owned .card-body {
     background-color: var(--muted-bg);
 }
@@ -500,6 +496,23 @@ body::before {
     margin: 1.25rem 0 0.5rem;
     padding-bottom: 0.25rem;
     border-bottom: 1px solid var(--bs-border-color);
+}
+
+/* Long series in the grouped library view collapse past the threshold; the
+   toggle button expands the .book-grid container, which un-hides extras. */
+.book-card.series-collapsed-extra {
+    display: none;
+}
+.book-grid.series-expanded .book-card.series-collapsed-extra {
+    display: flex;
+}
+.series-expand-toggle {
+    margin-top: 0.25rem;
+    padding-left: 0;
+    text-decoration: none;
+}
+.series-expand-toggle:hover {
+    text-decoration: underline;
 }
 
 /* Library group headers (per-series separator in flat library view). */

@@ -4,7 +4,8 @@ export function bookCardHtml(book: any): string {
     if (book.is_ghost) return ghostCardHtml(book);
     const coverImg = book.cover_filename
         ? `<img src="${api.coverUrl(book.user_id, book.cover_filename, book.cover_updated_at)}"
-               alt="${escapeHtml(book.title)}" loading="lazy">`
+               alt="${escapeHtml(book.title)}" loading="lazy"
+               onerror="this.outerHTML='&lt;div class=&quot;no-cover&quot;&gt;&lt;i class=&quot;bi bi-book&quot;&gt;&lt;/i&gt;&lt;/div&gt;'">`
         : `<div class="no-cover"><i class="bi bi-book"></i></div>`;
 
     const gutterClass = book.reading_status === 'read'
@@ -79,7 +80,7 @@ export function bookCardHtml(book: any): string {
 }
 
 // Ghost: a series_entries row the user doesn't have a book for.
-// Renders as a greyed tile with a "Not in library" badge and an
+// Renders as a hollow tile with a "Don't own" badge and an
 // "Add to library" hint. Click navigates to /add prefilled.
 export function ghostCardHtml(book: any): string {
     const seriesText = book.series
@@ -105,14 +106,15 @@ export function ghostCardHtml(book: any): string {
     // back to the placeholder icon when cover_url is null/empty.
     const coverInner = book.cover_url
         ? `<img src="${escapeAttr(book.cover_url)}"
-                alt="${escapeHtml(book.title || '')}" loading="lazy">`
+                alt="${escapeHtml(book.title || '')}" loading="lazy"
+                onerror="this.outerHTML='&lt;div class=&quot;no-cover&quot;&gt;&lt;i class=&quot;bi bi-plus-circle&quot;&gt;&lt;/i&gt;&lt;/div&gt;'">`
         : `<div class="no-cover"><i class="bi bi-plus-circle"></i></div>`;
 
     return `
         <div class="book-card card ghost-card" data-add-href="${escapeAttr(addHref)}" role="button" title="Add to library">
             <div class="cover-container ghost-cover">
                 ${coverInner}
-                <span class="ghost-badge">Not in library</span>
+                <span class="ghost-badge">Don&rsquo;t own</span>
             </div>
             <div class="card-info">
                 <div class="card-gutter gutter-unread"></div>
@@ -124,6 +126,16 @@ export function ghostCardHtml(book: any): string {
             </div>
         </div>
     `;
+}
+
+// Books whose series_index has a fractional part (e.g. 1.5, 0.5 — typically
+// novellas/short stories) are noise in series views unless the user has read
+// them. Integer positions and standalones (series_index null) are always shown.
+export function isHiddenShortStory(b: any): boolean {
+    if (b.series_index == null) return false;
+    const idx = Number(b.series_index);
+    if (!Number.isFinite(idx) || Number.isInteger(idx)) return false;
+    return b.reading_status !== 'read';
 }
 
 function escapeAttr(text: string): string {

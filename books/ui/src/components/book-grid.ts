@@ -1,9 +1,12 @@
-import { bookCardHtml } from './book-card';
+import { bookCardHtml, isHiddenShortStory } from './book-card';
 import { navigate } from '../router';
 
 export interface BookGridOptions {
     grouped?: boolean;  // emit per-series section headers
 }
+
+// Groups longer than this start collapsed in the grouped library view.
+const COLLAPSE_THRESHOLD = 6;
 
 export function bookGridHtml(
     books: any[],
@@ -22,33 +25,49 @@ export function bookGridHtml(
         return `<div class="book-grid">${cards}</div>`;
     }
 
-    // Grouped: emit a header whenever the series_link_id changes.
-    let out = '';
-    let lastKey: string | null = null;
-    let openGrid = false;
-    const flushOpen = () => {
-        if (openGrid) {
-            out += '</div>';
-            openGrid = false;
-        }
-    };
-    for (const b of books) {
+    // Grouped: drop unread novellas (fractional series_index, not yet read),
+    // bucket by series_link_id preserving caller sort, then emit heading +
+    // grid + optional "Show all N" toggle when the group is long.
+    const filtered = books.filter(b => !isHiddenShortStory(b));
+    const groupOrder: string[] = [];
+    const groupMap: Record<string, { heading: string; books: any[] }> = {};
+    for (const b of filtered) {
         const slid = b.series_link_id ?? null;
-        const groupKey = slid === null ? '__standalones__' : String(slid);
-        if (groupKey !== lastKey) {
-            flushOpen();
-            const heading = slid === null
-                ? 'Standalones'
-                : (b.series || 'Series');
-            out += `<h4 class="library-group-heading">${escapeHtml(heading)}</h4>`;
-            out += '<div class="book-grid">';
-            openGrid = true;
-            lastKey = groupKey;
+        const key = slid === null ? '__standalones__' : String(slid);
+        if (!groupMap[key]) {
+            groupOrder.push(key);
+            groupMap[key] = {
+                heading: slid === null ? 'Standalones' : (b.series || 'Series'),
+                books: [],
+            };
         }
-        out += bookCardHtml(b);
+        groupMap[key].books.push(b);
     }
-    flushOpen();
+
+    let out = '';
+    for (const key of groupOrder) {
+        const g = groupMap[key];
+        out += `<h4 class="library-group-heading">${escapeHtml(g.heading)}</h4>`;
+        out += '<div class="book-grid">';
+        const long = g.books.length > COLLAPSE_THRESHOLD;
+        for (let i = 0; i < g.books.length; i++) {
+            const card = bookCardHtml(g.books[i]);
+            out += (long && i >= COLLAPSE_THRESHOLD)
+                ? withClass(card, 'series-collapsed-extra')
+                : card;
+        }
+        out += '</div>';
+        if (long) {
+            out += `<button type="button" class="btn btn-link btn-sm series-expand-toggle" data-total="${g.books.length}">Show all ${g.books.length}</button>`;
+        }
+    }
     return out;
+}
+
+// Inject an extra class onto the .book-card root emitted by bookCardHtml.
+// The card opens with `class="book-card card...`; slot the new class in.
+function withClass(html: string, cls: string): string {
+    return html.replace('class="book-card card', `class="book-card card ${cls}`);
 }
 
 function escapeHtml(text: string): string {
@@ -85,6 +104,18 @@ export function attachGridClickHandlers(
                 e.stopPropagation();
             });
         }
+    });
+
+    container.querySelectorAll<HTMLButtonElement>('.series-expand-toggle').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const grid = btn.previousElementSibling as HTMLElement | null;
+            if (!grid || !grid.classList.contains('book-grid')) return;
+            const expanding = !grid.classList.contains('series-expanded');
+            grid.classList.toggle('series-expanded', expanding);
+            const total = btn.dataset.total || '0';
+            btn.textContent = expanding ? 'Collapse' : `Show all ${total}`;
+        });
     });
 }
 

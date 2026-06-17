@@ -3,6 +3,7 @@ import { getUser } from '../auth';
 import { getLibraryUsername } from '../context';
 import { navigateHome } from '../router';
 import { bookGridHtml, attachGridClickHandlers } from '../components/book-grid';
+import { isHiddenShortStory } from '../components/book-card';
 import { invalidateSeriesCache } from './series-list';
 import { setAuthorFilter } from './library';
 
@@ -41,12 +42,15 @@ export async function renderSeriesView(
         });
 
         // Merge owned + ghosts ordered by position so the timeline
-        // matches the canonical series order.
-        const merged: any[] = [...books, ...ghosts].sort((a, b) => {
-            const pa = a.hc_position ?? a.series_index ?? a.position ?? 9999;
-            const pb = b.hc_position ?? b.series_index ?? b.position ?? 9999;
-            return pa - pb;
-        });
+        // matches the canonical series order. Drop fractional-position
+        // novellas the reader hasn't finished — they're noise here.
+        const merged: any[] = [...books, ...ghosts]
+            .filter(b => !isHiddenShortStory(b))
+            .sort((a, b) => {
+                const pa = a.hc_position ?? a.series_index ?? a.position ?? 9999;
+                const pb = b.hc_position ?? b.series_index ?? b.position ?? 9999;
+                return pa - pb;
+            });
 
         const readCount = books.filter(b => b.reading_status === 'read').length;
         const notOwnedCount = books.filter(b => b.is_owned === 0).length;
