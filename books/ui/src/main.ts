@@ -18,17 +18,19 @@ initThemeToggle();
     const username = getLibraryUsername();
 
     if (!username) {
-        // Root "/" -- if single sign-on (or a stored token) identifies us,
-        // skip the login page and go straight to our library.
+        // Root "/" — there's no library context yet. Caddy already 302s
+        // to /ggouger/ for anonymous, but if we got here anyway (cookie
+        // races, future config changes, hand-typed URL), make the SPA
+        // also land everyone on Gordon's library so My Favs is the
+        // single front door. Logged-in users with a different username
+        // still get routed to their own library via fetchMe.
         const me = await fetchMe();
         if (me) {
             setUser(me);
             window.location.href = `/${me.username}/`;
             return;
         }
-        renderLogin();
-        bootstrapAuth();
-        updateNavbar();
+        window.location.href = '/ggouger/';
         return;
     }
 
