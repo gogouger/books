@@ -3,6 +3,7 @@ import { getLibraryUsername } from './context';
 import { addRoute, setDefaultRoute, startRouter } from './router';
 import { initThemeToggle } from './theme';
 import { renderLogin, updateNavbar } from './pages/login';
+import { renderFavs } from './pages/favs';
 import { renderLibrary, resetLibraryFilters } from './pages/library';
 import { renderBookDetail } from './pages/book-detail';
 import { renderSeriesView } from './pages/series-view';
@@ -43,12 +44,11 @@ initThemeToggle();
         localStorage.removeItem('books_user');
     }
 
-    // Library is the only browse page (was previously split with /series
-    // overview tiles; that got folded in, and now even the in-library
-    // series-cards mode is gone — books-grouped + books-flat is enough).
-    // /series/:id detail and /series/:id/edit still work for clicking
-    // into a specific series from a section header.
-    setDefaultRoute((p) => renderLibrary(p));
+    // Landing is now the curated "My Favs" view. The full library lives
+    // at /library; /series/:id detail and /series/:id/edit still work for
+    // clicking into a specific series from a section header.
+    setDefaultRoute((_p) => renderFavs());
+    addRoute('/favs', (_p) => renderFavs());
     addRoute('/book/:id/edit', (p) => renderBookEdit(p));
     addRoute('/book/:id', (p) => renderBookDetail(p));
     addRoute('/series/:id/edit', (p) => renderSeriesEdit(p));
