@@ -39,14 +39,14 @@ export function bookCardHtml(book: any): string {
 
     const ownedClass = book.is_owned === 0 ? ' not-owned' : '';
 
-    // Format pip on the cover corner — only shown for non-ebook (the default).
-    // Headphones = audiobook, book = physical. Helps scan the shelf for which
-    // format each title is when half the library came from Audible.
+    // Format pip on the cover corner — only shown for non-audiobook (the
+    // dominant format in this library). Half-open book = physical, tablet =
+    // ebook. Audiobook stays badge-free so the shelf scans clean.
     let formatBadge = '';
-    if (book.book_format === 'audiobook') {
-        formatBadge = '<span class="cover-format-badge fmt-audiobook" title="Audiobook"><i class="bi bi-headphones"></i></span>';
-    } else if (book.book_format === 'physical') {
+    if (book.book_format === 'physical') {
         formatBadge = '<span class="cover-format-badge fmt-physical" title="Physical"><i class="bi bi-book-half"></i></span>';
+    } else if (book.book_format === 'ebook') {
+        formatBadge = '<span class="cover-format-badge fmt-ebook" title="Ebook"><i class="bi bi-tablet"></i></span>';
     }
 
     const progressBar = book.reading_status === 'reading' && book.progress
