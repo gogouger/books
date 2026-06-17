@@ -270,6 +270,17 @@ body::before {
                 0 8px 25px rgba(212, 175, 55, 0.28);
 }
 
+/* Second-favorite tier — silver border, one notch below gold. */
+.book-card.second-fav {
+    border: 2px solid #b8b8b8;
+    box-shadow: 0 0 0 1px rgba(184, 184, 184, 0.25),
+                0 4px 14px rgba(184, 184, 184, 0.18);
+}
+.book-card.second-fav:hover {
+    box-shadow: 0 0 0 1px rgba(184, 184, 184, 0.5),
+                0 8px 25px rgba(184, 184, 184, 0.28);
+}
+
 /* All-time favorite — gem in the top-left corner. Sapphire-ish blue. */
 .cover-fav-badge {
     position: absolute;

@@ -38,7 +38,9 @@ export function bookCardHtml(book: any): string {
         : '';
 
     const ownedClass = book.is_owned === 0 ? ' not-owned' : '';
-    const allTimeClass = book.is_all_time_fav === 1 ? ' all-time-fav' : '';
+    const allTimeClass = book.is_all_time_fav === 1
+        ? ' all-time-fav'
+        : book.is_second_fav === 1 ? ' second-fav' : '';
 
     const formatBadge = formatBadgeHtml(book.book_format);
     const allTimeFav = allTimeFavBadgeHtml(book);
