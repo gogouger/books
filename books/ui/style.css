@@ -240,6 +240,24 @@ body::before {
     background-color: var(--muted-bg);
 }
 
+/* Format pip on the cover corner. Ebook is default — no badge. Audiobook gets
+   a headphones icon (Audible's lane), physical gets a half-open book. */
+.cover-format-badge {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: rgba(0, 0, 0, 0.65);
+    color: #fff;
+    padding: 3px 6px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+.cover-format-badge .bi { font-size: 0.9rem; }
+
 /* Ghost cards — series entries the user doesn't have a book for.
    Hollow look with a dashed border and a "Not in library" pill. */
 .book-card.ghost-card {
