@@ -38,6 +38,7 @@ export function bookCardHtml(book: any): string {
         : '';
 
     const ownedClass = book.is_owned === 0 ? ' not-owned' : '';
+    const allTimeClass = book.is_all_time_fav === 1 ? ' all-time-fav' : '';
 
     const formatBadge = formatBadgeHtml(book.book_format);
     const allTimeFav = allTimeFavBadgeHtml(book);
@@ -61,7 +62,7 @@ export function bookCardHtml(book: any): string {
 
 
     return `
-        <div class="book-card card${ownedClass}" data-book-id="${book.id}" role="button">
+        <div class="book-card card${ownedClass}${allTimeClass}" data-book-id="${book.id}" role="button">
             <div class="cover-container">
                 ${coverImg}
                 ${formatBadge}
