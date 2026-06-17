@@ -39,15 +39,7 @@ export function bookCardHtml(book: any): string {
 
     const ownedClass = book.is_owned === 0 ? ' not-owned' : '';
 
-    // Format pip on the cover corner — only shown for non-audiobook (the
-    // dominant format in this library). Half-open book = physical, tablet =
-    // ebook. Audiobook stays badge-free so the shelf scans clean.
-    let formatBadge = '';
-    if (book.book_format === 'physical') {
-        formatBadge = '<span class="cover-format-badge fmt-physical" title="Physical"><i class="bi bi-book-half"></i></span>';
-    } else if (book.book_format === 'ebook') {
-        formatBadge = '<span class="cover-format-badge fmt-ebook" title="Ebook"><i class="bi bi-tablet"></i></span>';
-    }
+    const formatBadge = formatBadgeHtml(book.book_format);
 
     const progressBar = book.reading_status === 'reading' && book.progress
         ? `<div class="card-progress"><div class="card-progress-fill" style="width:${(book.progress * 100).toFixed(1)}%"></div></div>`
@@ -137,6 +129,21 @@ export function ghostCardHtml(book: any): string {
             </div>
         </div>
     `;
+}
+
+// Format pip on the cover corner. Shown on every book — half-open book
+// (physical), headphones (audiobook), tablet (ebook). Helps scan the shelf.
+export function formatBadgeHtml(format: string | undefined | null): string {
+    if (format === 'physical') {
+        return '<span class="cover-format-badge fmt-physical" title="Physical"><i class="bi bi-book-half"></i></span>';
+    }
+    if (format === 'audiobook') {
+        return '<span class="cover-format-badge fmt-audiobook" title="Audiobook"><i class="bi bi-headphones"></i></span>';
+    }
+    if (format === 'ebook') {
+        return '<span class="cover-format-badge fmt-ebook" title="Ebook"><i class="bi bi-tablet"></i></span>';
+    }
+    return '';
 }
 
 // Books whose series position has a fractional part (e.g. 1.5, 0.5 — typically
