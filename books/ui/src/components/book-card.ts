@@ -128,12 +128,14 @@ export function ghostCardHtml(book: any): string {
     `;
 }
 
-// Books whose series_index has a fractional part (e.g. 1.5, 0.5 — typically
+// Books whose series position has a fractional part (e.g. 1.5, 0.5 — typically
 // novellas/short stories) are noise in series views unless the user has read
-// them. Integer positions and standalones (series_index null) are always shown.
+// them. Integer positions and standalones (no position) are always shown.
+// Ghosts come through with `position` instead of `series_index`; check both.
 export function isHiddenShortStory(b: any): boolean {
-    if (b.series_index == null) return false;
-    const idx = Number(b.series_index);
+    const raw = b.series_index ?? b.hc_position ?? b.position;
+    if (raw == null) return false;
+    const idx = Number(raw);
     if (!Number.isFinite(idx) || Number.isInteger(idx)) return false;
     return b.reading_status !== 'read';
 }

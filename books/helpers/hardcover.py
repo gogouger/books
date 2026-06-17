@@ -458,7 +458,10 @@ _NON_ENGLISH_TOKENS = frozenset({
     # German
     "der", "die", "das", "und", "von", "ein", "eine",
     # Italian
-    "lo", "gli", "il", "della", "delle", "dei",
+    "lo", "gli", "il", "della", "delle", "dei", "libro", "segreto",
+    "eroi", "dell", "olimpo",
+    # Dutch — caught "De wolven van Arazan", "Percy Jackson en de Griekse goden"
+    "wolven", "griekse", "goden", "helden", "koningen",
     # Polish (mostly ASCII)
     "diuny", "łowcy", "czerwie",
     # Catalan
