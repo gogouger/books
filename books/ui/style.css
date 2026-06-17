@@ -258,6 +258,37 @@ body::before {
 }
 .cover-format-badge .bi { font-size: 0.9rem; }
 
+/* All-time favorite — gem in the top-left corner. Sapphire-ish blue. */
+.cover-fav-badge {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    background: rgba(0, 0, 0, 0.65);
+    color: #6cb6ff;
+    padding: 3px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+.cover-fav-badge .bi { font-size: 0.95rem; }
+
+.favs-category-heading {
+    color: var(--bs-primary);
+    font-weight: 600;
+    font-size: 1.05rem;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    margin: 1.75rem 0 0.5rem;
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid var(--bs-border-color);
+}
+.favs-category-heading:first-of-type {
+    margin-top: 0.5rem;
+}
+
 /* Ghost cards — series entries the user doesn't have a book for.
    Hollow look with a dashed border and a "Not in library" pill. */
 .book-card.ghost-card {

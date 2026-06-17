@@ -40,6 +40,7 @@ export function bookCardHtml(book: any): string {
     const ownedClass = book.is_owned === 0 ? ' not-owned' : '';
 
     const formatBadge = formatBadgeHtml(book.book_format);
+    const allTimeFav = allTimeFavBadgeHtml(book);
 
     const progressBar = book.reading_status === 'reading' && book.progress
         ? `<div class="card-progress"><div class="card-progress-fill" style="width:${(book.progress * 100).toFixed(1)}%"></div></div>`
@@ -64,6 +65,7 @@ export function bookCardHtml(book: any): string {
             <div class="cover-container">
                 ${coverImg}
                 ${formatBadge}
+                ${allTimeFav}
                 ${progressBar}
             </div>
             <div class="card-info">
@@ -129,6 +131,14 @@ export function ghostCardHtml(book: any): string {
             </div>
         </div>
     `;
+}
+
+// Special-tier marker for "all-time favorites" — books Gordon would name
+// off the top of his head. Shown as a small gem on the cover, distinct
+// from the format pip (which lives top-right).
+export function allTimeFavBadgeHtml(b: any): string {
+    if (b.is_all_time_fav !== 1) return '';
+    return '<span class="cover-fav-badge" title="All-time favorite"><i class="bi bi-gem"></i></span>';
 }
 
 // Format pip on the cover corner. Shown on every book — half-open book
