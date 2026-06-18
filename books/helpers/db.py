@@ -1839,8 +1839,9 @@ def update_book(
         "cover_filename", "cover_updated_at",
         "file_path", "epub_hash", "isbn", "asin", "goodreads_id",
         "tags", "date_finished", "published_date",
-        "rating", "reading_status",
+        "rating", "reading_status", "book_format",
         "progress", "is_favorite", "is_owned",
+        "is_all_time_fav", "is_second_fav",
         "series_ignored", "manual_category",
     }
     filtered = {
