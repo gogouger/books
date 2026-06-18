@@ -1,6 +1,7 @@
 import { api } from '../api';
 import { getLibraryUsername } from '../context';
 import { bookGridHtml, attachGridClickHandlers, appendToBookGrid } from '../components/book-grid';
+import { setDropdownValue } from '../components/dropdown';
 import {
     filterBarHtml,
     attachFilterHandlers,
@@ -86,8 +87,9 @@ function applyAuthorFilter(author: string): void {
     if (searchInput) searchInput.value = author;
     const clearBtn = document.getElementById('filter-search-clear');
     if (clearBtn) clearBtn.classList.remove('d-none');
-    const sortSelect = document.getElementById('filter-sort') as HTMLSelectElement;
-    if (sortSelect) sortSelect.value = 'title';
+    // sort widget is now a custom dropdown — sync its data-value and label.
+    const app = document.getElementById('app');
+    if (app) setDropdownValue(app, 'filter-sort', 'title');
 
     syncUrlHash();
     resetAndReload();

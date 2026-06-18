@@ -1,3 +1,5 @@
+import { dropdownHtml, attachDropdowns } from './dropdown';
+
 export type LibraryView = 'books-grouped' | 'books-flat';
 export type LibraryCategory =
     | 'all'
@@ -101,45 +103,45 @@ export function filterBarHtml(
         sorts = sortOptions || DEFAULT_SORT_OPTIONS;
     }
 
-    let filterHtml = '';
-    for (const opt of filters) {
-        if (opt.hr) {
-            filterHtml += '<hr class="dropdown-divider">';
-        } else {
-            filterHtml += `<option value="${opt.value}"${state.filter === opt.value ? ' selected' : ''}>${opt.label}</option>`;
-        }
-    }
-
-    let sortHtml = '';
-    for (const opt of sorts) {
-        sortHtml += `<option value="${opt.value}"${state.sort === opt.value ? ' selected' : ''}>${opt.label}</option>`;
-    }
-
-    const currentView = state.view || 'books-grouped';
-    let viewHtml = '';
-    for (const opt of VIEW_OPTIONS) {
-        viewHtml += `<option value="${opt.value}"${currentView === opt.value ? ' selected' : ''}>${opt.label}</option>`;
-    }
-
-    const currentCategory = state.category || 'all';
-    let categoryHtml = '';
-    for (const opt of CATEGORY_OPTIONS) {
-        categoryHtml += `<option value="${opt.value}"${currentCategory === opt.value ? ' selected' : ''}>${opt.label}</option>`;
-    }
+    // Render the dropdowns through the shared custom-widget helper instead
+    // of bare <select>: it gives us a themed panel, hr dividers, and
+    // indented (sub-category) entries that real <select> can't render.
+    const viewDd = showView
+        ? `<div class="col-auto">${dropdownHtml({
+            id: 'filter-view',
+            items: VIEW_OPTIONS.map(o => ({ value: o.value, label: o.label })),
+            value: state.view || 'books-grouped',
+            title: 'View mode',
+            minWidth: '155px',
+        })}</div>` : '';
+    const categoryDd = showCategory
+        ? `<div class="col-auto">${dropdownHtml({
+            id: 'filter-category',
+            items: CATEGORY_OPTIONS.map(o => ({ value: o.value, label: o.label })),
+            value: state.category || 'all',
+            title: 'Category',
+            minWidth: '160px',
+        })}</div>` : '';
+    const filterDd = `<div class="col-auto">${dropdownHtml({
+        id: 'filter-main',
+        items: filters,
+        value: state.filter,
+        title: 'Filter',
+        minWidth: '150px',
+    })}</div>`;
+    const sortDd = `<div class="col-auto">${dropdownHtml({
+        id: 'filter-sort',
+        items: sorts.map(o => ({ value: o.value, label: o.label })),
+        value: state.sort,
+        title: 'Sort by',
+        minWidth: '130px',
+    })}</div>`;
 
     return `
         <div class="filter-bar">
             <div class="row g-2 align-items-end">
-                ${showView ? `<div class="col-auto">
-                    <select class="form-select" id="filter-view" title="View mode">
-                        ${viewHtml}
-                    </select>
-                </div>` : ''}
-                ${showCategory ? `<div class="col-auto">
-                    <select class="form-select" id="filter-category" title="Category">
-                        ${categoryHtml}
-                    </select>
-                </div>` : ''}
+                ${viewDd}
+                ${categoryDd}
                 <div class="col-auto position-relative">
                     <input type="text" class="form-control" id="filter-search"
                            placeholder="Search..."
@@ -149,16 +151,8 @@ export function filterBarHtml(
                         <i class="bi bi-x-lg"></i>
                     </button>
                 </div>
-                <div class="col-auto">
-                    <select class="form-select" id="filter-main">
-                        ${filterHtml}
-                    </select>
-                </div>
-                <div class="col-auto">
-                    <select class="form-select" id="filter-sort">
-                        ${sortHtml}
-                    </select>
-                </div>
+                ${filterDd}
+                ${sortDd}
                 <div class="col-auto">
                     <button type="button" class="btn btn-outline-secondary" id="filter-order"
                             data-order="${state.order}" title="${state.order === 'asc' ? 'Ascending' : 'Descending'}">
@@ -185,17 +179,22 @@ export function attachFilterHandlers(
 ): void {
     let debounceTimer: ReturnType<typeof setTimeout>;
 
+    const readDd = (id: string): string => {
+        const el = container.querySelector<HTMLElement>(`#${id}`);
+        return el?.dataset.ddValue ?? '';
+    };
+
     const getState = (): FilterState => ({
         q: (container.querySelector('#filter-search') as HTMLInputElement)?.value || '',
-        filter: (container.querySelector('#filter-main') as HTMLSelectElement)?.value || '',
-        sort: (container.querySelector('#filter-sort') as HTMLSelectElement)?.value || 'title',
+        filter: readDd('filter-main'),
+        sort: readDd('filter-sort') || 'title',
         order: (container.querySelector('#filter-order') as HTMLElement)?.dataset.order || 'asc',
         rated: (() => {
             const v = (container.querySelector('#filter-rated') as HTMLElement)?.dataset.rated;
             return v === 'true' ? true : v === 'false' ? false : null;
         })(),
-        view: ((container.querySelector('#filter-view') as HTMLSelectElement)?.value || undefined) as LibraryView | undefined,
-        category: ((container.querySelector('#filter-category') as HTMLSelectElement)?.value || undefined) as LibraryCategory | undefined,
+        view: (readDd('filter-view') || undefined) as LibraryView | undefined,
+        category: (readDd('filter-category') || undefined) as LibraryCategory | undefined,
     });
 
     const searchInput = container.querySelector('#filter-search') as HTMLInputElement;
@@ -219,10 +218,8 @@ export function attachFilterHandlers(
         });
     }
 
-    ['#filter-main', '#filter-sort', '#filter-view', '#filter-category'].forEach(sel => {
-        const el = container.querySelector(sel);
-        if (el) el.addEventListener('change', () => onChange(getState()));
-    });
+    // Hook the four custom dropdowns up to onChange.
+    attachDropdowns(container, () => onChange(getState()));
 
     const orderBtn = container.querySelector('#filter-order') as HTMLElement;
     if (orderBtn) {
