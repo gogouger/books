@@ -52,11 +52,24 @@ def _author_tokens(name: str) -> set[str]:
 # Caps tuned for the 100-req/15min Hardcover budget. A full rebuild does:
 # - 1 author search per unique seed author (up to AUTHOR_CAP)
 # - 1 title search per seed book (up to SEED_CAP)
-# - 1 fetch_book_detail per resulting rec (for the cover) up to COVER_CAP
+# - 1 top-books-by-genre query per shared genre (up to GENRE_CAP)
 AUTHOR_CAP = 10
 SEED_CAP = 15
-COVER_CAP = 30
+GENRE_CAP = 6
 SLEEP_BETWEEN = 0.5  # seconds, polite spacing
+
+# Genres on Hardcover that are too broad to anchor a "top in genre" row.
+# These describe ~everything; including them would make Row 3 collapse to
+# "top books overall" (a few Harry Potters and Ranger's Apprentices).
+_BROAD_GENRES = frozenset({
+    "Fiction", "Nonfiction", "Adult", "adult", "Audiobook",
+    "Adventure", "Romance", "Young Adult", "Teen & Young Adult",
+    "Young Adult Fiction", "Children's", "Picture Book",
+    "Science Fiction & Fantasy",  # the whole bookstore section
+    "Magic",  # too generic — every fantasy book is "magic"
+    "Action & Adventure",
+    "General",
+})
 
 
 def _normalize_author(name: str) -> str:
@@ -325,15 +338,25 @@ async def more_from_loved_authors(
 async def similar_to_favorites(
     user_id: int, dismissed: set[int]
 ) -> list[dict]:
-    """Hardcover title-search per gold/silver/5★ seed book.
+    """Top books in the genres shared by your gold/silver/5★ seeds.
 
-    Search by title only (no author) so the hits skew toward
-    genre-adjacent books rather than just other works by the same
-    author (which Row 2 already handles).
+    Earlier versions of this row used a title-only Hardcover search per
+    seed and tried to take the next-best hit. After same-author and
+    in-library filtering it almost always returned zero — title-search
+    just isn't the right primitive for genre-similar discovery.
+
+    The new approach:
+      1. For each seed, fetch its `genres` list from a single HC search.
+      2. Score each non-generic genre by how many seeds it covers, then
+         take the top few — "shared genre" is a stronger signal than
+         "one seed mentioned it".
+      3. For each top genre, query the `books` table filtered by
+         `cached_tags _contains {Genre: [{tag: G}]}`, ordered by
+         users_count desc. Hardcover's JSONB containment makes this a
+         single GraphQL call per genre.
+      4. Filter out: seed authors (Row 2 handles them), existing library
+         titles, already-shown.
     """
-    # Skip Unknown-author seeds — same reason as loved_authors. Without
-    # an author to filter against, HC returns same-corpus reprints (NIV
-    # for ESV Study Bible seed) that aren't real recommendations.
     seeds = [
         s for s in gather_seeds(user_id)["books"][:SEED_CAP]
         if _normalize_author((s["authors"] or "").split(",")[0])
@@ -343,50 +366,95 @@ async def similar_to_favorites(
         return []
 
     existing_norm, existing_loose = _existing_title_keys(user_id)
-    seen_hc_ids: set[int] = set()
-    recs: list[dict] = []
 
+    # Seed authors — anything by them surfaces in Row 2; don't double up.
+    seed_author_tokens: set[str] = set()
+    for s in seeds:
+        for nm in (s["authors"] or "").split(","):
+            seed_author_tokens |= _author_tokens(nm)
+
+    # Step 1: pull each seed's genre list. One HC call per seed, capped.
+    # Use the seed's title to find it on HC, then read the genres array.
+    genre_to_seeds: dict[str, list[str]] = {}
     for seed in seeds:
         try:
-            results = await hardcover.search_books_rich(
-                seed["title"], per_page=15,
+            hits = await hardcover.search_books_rich(
+                seed["title"], per_page=3,
             )
         except Exception:
-            log.exception("HC similar search failed: %s", seed["title"])
+            log.exception(
+                "HC genre fetch failed for %s", seed["title"],
+            )
             continue
         await asyncio.sleep(SLEEP_BETWEEN)
 
-        seed_norm = hardcover.normalize_title(seed["title"])
-        seed_author_tokens = _author_tokens(
+        # First hit whose primary author tokens overlap with seed's
+        # author — guards against HC returning a different-author book
+        # with the same title (the "Final Empire" by Kötke trap).
+        seed_first_author_tokens = _author_tokens(
             (seed["authors"] or "").split(",")[0]
         )
+        match_doc = None
+        for h in hits:
+            names = h.get("author_names") or []
+            if not names:
+                continue
+            if not seed_first_author_tokens or seed_first_author_tokens.issubset(
+                _author_tokens(names[0])
+            ):
+                match_doc = h
+                break
+        if not match_doc:
+            continue
 
-        # Sort by popularity within this seed's hits — Hardcover's default
-        # ordering is "relevance" which surfaces archive.org reprints and
-        # 17th-century devotionals before the actual related novels.
-        ranked = sorted(
-            results, key=lambda h: -h.get("ratings_count", 0),
-        )
+        # Hardcover's `genres` array is ordered roughly
+        # most-specific-first; take the first 3 non-generic entries per
+        # seed so a seed weighs three buckets rather than one.
+        kept = 0
+        for g in match_doc.get("genres") or []:
+            if not g or g in _BROAD_GENRES:
+                continue
+            bucket = genre_to_seeds.setdefault(g, [])
+            if seed["title"] not in bucket:
+                bucket.append(seed["title"])
+            kept += 1
+            if kept >= 3:
+                break
 
-        # Pick one non-seed, non-same-author, non-noise hit per seed
-        for hit in ranked:
-            hc_id = int(hit.get("id") or 0)
+    if not genre_to_seeds:
+        return []
+
+    # Step 2: pick the top-N genres by seed-coverage.
+    top_genres = sorted(
+        genre_to_seeds.keys(),
+        key=lambda g: (-len(genre_to_seeds[g]), g),
+    )[:GENRE_CAP]
+
+    # Step 3: query top books per genre, filter, dedupe.
+    seen_hc_ids: set[int] = set()
+    recs: list[dict] = []
+
+    for genre in top_genres:
+        try:
+            books = await hardcover.top_books_by_genre(genre, limit=12)
+        except Exception:
+            log.exception("HC top_books_by_genre failed: %s", genre)
+            continue
+        await asyncio.sleep(SLEEP_BETWEEN)
+
+        anchor_seed = genre_to_seeds[genre][0]
+        per_genre = 0
+        for b in books:
+            hc_id = b.get("id")
             if not hc_id or hc_id in seen_hc_ids or hc_id in dismissed:
                 continue
 
-            if hit.get("compilation"):
-                continue
-            if (hit.get("ratings_count") or 0) < 10:
-                continue  # cuts archive.org / obscure-edition reprints
-
-            title = hit.get("title", "")
+            title = b.get("title", "")
             if _is_noise_hit(title):
                 continue
 
-            hit_title_norm = hardcover.normalize_title(title)
-            if hit_title_norm == seed_norm:
-                continue
-            if hit_title_norm in existing_norm:
+            title_key = hardcover.normalize_title(title)
+            if title_key in existing_norm:
                 continue
             loose = _loose_norm(title)
             if any(
@@ -396,30 +464,25 @@ async def similar_to_favorites(
             ):
                 continue
 
-            # Skip same-author hits — those belong in Row 2
-            hit_author_tokens: set[str] = set()
-            for nm in hit.get("author_names") or []:
-                hit_author_tokens |= _author_tokens(nm)
-            if (
-                seed_author_tokens
-                and seed_author_tokens.issubset(hit_author_tokens)
-            ):
+            # Skip authors already represented in Row 2
+            author_tokens = _author_tokens(b.get("primary_author", ""))
+            if author_tokens and author_tokens.issubset(seed_author_tokens):
                 continue
-
-            primary_author = ", ".join(
-                hit.get("author_names") or []
-            ) or "Unknown"
 
             seen_hc_ids.add(hc_id)
             recs.append({
                 "kind": "similar_to",
                 "hc_book_id": hc_id,
                 "title": title,
-                "authors": primary_author,
-                "cover_url": hit.get("cover_url"),
-                "why": f"Because you loved “{seed['title']}”",
+                "authors": b.get("primary_author") or "Unknown",
+                "cover_url": b.get("cover_url"),
+                "why": (
+                    f"Top {genre} — you loved “{anchor_seed}”"
+                ),
             })
-            break  # one per seed for variety
+            per_genre += 1
+            if per_genre >= 3:
+                break
 
     return recs
 

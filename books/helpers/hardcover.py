@@ -100,7 +100,7 @@ async def search_books_rich(
     inline so we can filter without a second round-trip per hit.
 
     Returns list of dicts:
-      {id, title, author_names, series_names, compilation,
+      {id, title, author_names, series_names, genres, compilation,
        ratings_count, rating, cover_url, slug}.
     """
     gql = """
@@ -133,11 +133,81 @@ async def search_books_rich(
             "title": doc.get("title", ""),
             "author_names": list(doc.get("author_names") or []),
             "series_names": list(doc.get("series_names") or []),
+            "genres": list(doc.get("genres") or []),
             "compilation": bool(doc.get("compilation")),
             "ratings_count": int(doc.get("ratings_count") or 0),
             "rating": doc.get("rating"),
             "cover_url": cover_url or None,
             "slug": doc.get("slug", ""),
+        })
+    return results
+
+
+async def top_books_by_genre(
+    genre: str, limit: int = 12, min_users: int = 1000,
+) -> list[dict]:
+    """Top books filtered by `cached_tags.Genre` containing `genre`.
+
+    Hardcover stores genre/mood/tag info as a JSONB column with a
+    structure like:
+      {Genre: [{tag: "Epic Fantasy", ...}, ...], Mood: [...], ...}
+    The `_contains` operator handles JSONB containment so we can ask
+    'give me books where the Genre array contains an entry with this
+    exact tag string'. Hits are sorted by users_count desc so the
+    popular real books outrank reprints.
+
+    Returns list of dicts:
+      {id, title, primary_author, users_count, rating, ratings_count,
+       cover_url, slug}.
+    """
+    safe_genre = genre.replace('"', '\\"')
+    gql = """
+    {
+      books(
+        order_by: {users_count: desc_nulls_last},
+        limit: %d,
+        where: {
+          users_count: {_gt: %d},
+          cached_tags: {_contains: {Genre: [{tag: "%s"}]}}
+        }
+      ) {
+        id
+        title
+        slug
+        users_count
+        rating
+        ratings_count
+        image { url }
+        contributions(limit: 1) {
+          author { name }
+        }
+      }
+    }
+    """ % (limit, min_users, safe_genre)
+    try:
+        data = await _graphql(gql)
+    except Exception:
+        log.exception("Hardcover top_books_by_genre failed: %s", genre)
+        return []
+
+    results = []
+    for b in (data.get("data") or {}).get("books") or []:
+        image = b.get("image") or {}
+        cover_url = image.get("url") if isinstance(image, dict) else None
+        contribs = b.get("contributions") or []
+        primary = (
+            contribs[0]["author"]["name"]
+            if contribs and contribs[0].get("author") else ""
+        )
+        results.append({
+            "id": int(b["id"]),
+            "title": b.get("title", ""),
+            "primary_author": primary,
+            "users_count": int(b.get("users_count") or 0),
+            "rating": float(b["rating"]) if b.get("rating") else None,
+            "ratings_count": int(b.get("ratings_count") or 0),
+            "cover_url": cover_url or None,
+            "slug": b.get("slug", ""),
         })
     return results
 
