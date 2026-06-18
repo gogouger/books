@@ -63,14 +63,33 @@ def _normalize_author(name: str) -> str:
     return (name or "").strip().lower()
 
 
-def _existing_title_keys(user_id: int) -> set[str]:
+def _loose_norm(title: str) -> str:
+    """Like hardcover.normalize_title but does NOT split at the colon.
+
+    Keeps the full title so 'Mistborn: The Final Empire' becomes
+    'mistborn the final empire' instead of 'mistborn' — which is what
+    we need for substring dedup against 'The Final Empire'.
+    """
+    if not title:
+        return ""
+    t = hardcover.strip_diacritics(title).lower().strip()
+    t = re.sub(r"^(the|a|an)\s+", "", t)
+    t = re.sub(r"[^a-z0-9\s]", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _existing_title_keys(user_id: int) -> tuple[set[str], set[str]]:
+    """Return (normalized, loose) sets for existing-library dedup."""
     conn = db.get_db()
     rows = conn.execute(
         "SELECT title FROM books WHERE user_id = ?",
         (user_id,),
     ).fetchall()
     conn.close()
-    return {hardcover.normalize_title(r["title"]) for r in rows}
+    normalized = {hardcover.normalize_title(r["title"]) for r in rows}
+    loose = {_loose_norm(r["title"]) for r in rows if r["title"]}
+    return normalized, loose
 
 
 def gather_seeds(user_id: int) -> dict:
@@ -214,7 +233,7 @@ async def more_from_loved_authors(
                 }
 
     author_items = list(authors.values())[:AUTHOR_CAP]
-    existing_titles = _existing_title_keys(user_id)
+    existing_norm, existing_loose = _existing_title_keys(user_id)
 
     recs: list[dict] = []
     seen_hc_ids: set[int] = set()
@@ -269,15 +288,16 @@ async def more_from_loved_authors(
                 continue
 
             title_key = hardcover.normalize_title(title)
-            if title_key in existing_titles:
+            if title_key in existing_norm:
                 continue
-            # Containment dedup — "Mistborn: The Final Empire" should
-            # match the user's "The Final Empire" even though normalize
-            # strips at the colon and yields "mistborn".
+            # Loose containment — handles "Mistborn: The Final Empire"
+            # being a dup of the user's "The Final Empire" without the
+            # colon-strip.
+            loose = _loose_norm(title)
             if any(
-                title_key and ex and len(ex) > 4
-                and (title_key in ex or ex in title_key)
-                for ex in existing_titles
+                loose and ex and len(ex) > 4
+                and (loose in ex or ex in loose)
+                for ex in existing_loose
             ):
                 continue
 
@@ -311,11 +331,18 @@ async def similar_to_favorites(
     genre-adjacent books rather than just other works by the same
     author (which Row 2 already handles).
     """
-    seeds = gather_seeds(user_id)["books"][:SEED_CAP]
+    # Skip Unknown-author seeds — same reason as loved_authors. Without
+    # an author to filter against, HC returns same-corpus reprints (NIV
+    # for ESV Study Bible seed) that aren't real recommendations.
+    seeds = [
+        s for s in gather_seeds(user_id)["books"][:SEED_CAP]
+        if _normalize_author((s["authors"] or "").split(",")[0])
+        not in ("", "unknown")
+    ]
     if not seeds:
         return []
 
-    existing_titles = _existing_title_keys(user_id)
+    existing_norm, existing_loose = _existing_title_keys(user_id)
     seen_hc_ids: set[int] = set()
     recs: list[dict] = []
 
@@ -359,14 +386,13 @@ async def similar_to_favorites(
             hit_title_norm = hardcover.normalize_title(title)
             if hit_title_norm == seed_norm:
                 continue
-            if hit_title_norm in existing_titles:
+            if hit_title_norm in existing_norm:
                 continue
+            loose = _loose_norm(title)
             if any(
-                hit_title_norm and (
-                    hit_title_norm in ex or ex in hit_title_norm
-                )
-                for ex in existing_titles
-                if ex and len(ex) > 4
+                loose and ex and len(ex) > 4
+                and (loose in ex or ex in loose)
+                for ex in existing_loose
             ):
                 continue
 
