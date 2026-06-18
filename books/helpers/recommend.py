@@ -198,12 +198,14 @@ async def more_from_loved_authors(
 ) -> list[dict]:
     """Hardcover by-author search across gold/silver/5★ authors."""
     seeds = gather_seeds(user_id)
-    # Unique-author map; pick the highest-tier book as the "why" anchor
+    # Unique-author map; pick the highest-tier book as the "why" anchor.
+    # Skip seeds where the author is unknown — searching "Unknown" surfaces
+    # ESV reprints and weird mislabelled-corpus hits, not useful recs.
     authors: dict[str, dict] = {}
     for b in seeds["books"]:
         for author in (b["authors"] or "").split(","):
             key = _normalize_author(author)
-            if not key:
+            if not key or key == "unknown":
                 continue
             if key not in authors:
                 authors[key] = {
@@ -242,25 +244,44 @@ async def more_from_loved_authors(
             if hit.get("compilation"):
                 continue
 
-            # Token-subset match against the full author_names list
-            # (covers collabs and "Last, First" reorderings).
-            hit_tokens: set[str] = set()
-            for nm in hit.get("author_names") or []:
-                hit_tokens |= _author_tokens(nm)
-            if not seed_tokens or not seed_tokens.issubset(hit_tokens):
+            # Match against the PRIMARY author only (author_names[0]).
+            # Subset across the full list lets companion books like
+            # "Stormlight World Guide" pass because Sanderson is in their
+            # contributors list — but he didn't write them. The primary
+            # author is the one we actually want to follow.
+            names = hit.get("author_names") or []
+            if not names:
+                continue
+            primary_tokens = _author_tokens(names[0])
+            if not seed_tokens or not seed_tokens.issubset(primary_tokens):
                 continue
 
             title = hit.get("title", "")
             if _is_noise_hit(title):
                 continue
 
+            # Companion/guide books often put the seed author's name IN
+            # their own title ("...Brandon Sanderson's The Stormlight...").
+            # If the seed author appears in the hit title, it's likely
+            # not by them.
+            title_lc_tokens = _author_tokens(title)
+            if seed_tokens.issubset(title_lc_tokens):
+                continue
+
             title_key = hardcover.normalize_title(title)
             if title_key in existing_titles:
                 continue
+            # Containment dedup — "Mistborn: The Final Empire" should
+            # match the user's "The Final Empire" even though normalize
+            # strips at the colon and yields "mistborn".
+            if any(
+                title_key and ex and len(ex) > 4
+                and (title_key in ex or ex in title_key)
+                for ex in existing_titles
+            ):
+                continue
 
-            primary_author = ", ".join(
-                hit.get("author_names") or []
-            ) or author["name"]
+            primary_author = ", ".join(names) or author["name"]
 
             seen_hc_ids.add(hc_id)
             recs.append({
@@ -301,7 +322,7 @@ async def similar_to_favorites(
     for seed in seeds:
         try:
             results = await hardcover.search_books_rich(
-                seed["title"], per_page=8,
+                seed["title"], per_page=15,
             )
         except Exception:
             log.exception("HC similar search failed: %s", seed["title"])
@@ -328,8 +349,8 @@ async def similar_to_favorites(
 
             if hit.get("compilation"):
                 continue
-            if (hit.get("ratings_count") or 0) < 50:
-                continue  # archive.org / obscure-edition floor
+            if (hit.get("ratings_count") or 0) < 10:
+                continue  # cuts archive.org / obscure-edition reprints
 
             title = hit.get("title", "")
             if _is_noise_hit(title):
