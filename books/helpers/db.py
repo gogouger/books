@@ -238,6 +238,7 @@ def init_db() -> None:
     _migrate_sync_version()
     _migrate_series_complete()
     _migrate_book_format()
+    _migrate_also_physical()
     _migrate_review()
     _migrate_manual_category()
     _migrate_series_entries_cover_url()
@@ -628,6 +629,27 @@ def _migrate_book_format() -> None:
     log.info("Adding book_format column to books")
     conn.execute(
         "ALTER TABLE books ADD COLUMN book_format TEXT DEFAULT 'ebook'"
+    )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_also_physical() -> None:
+    """Add an also_physical flag — true when a book has both audio/ebook
+    AND a physical copy. The card renders two badges in that case."""
+    conn = get_db()
+    columns = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(books)"
+        ).fetchall()
+    ]
+    if "also_physical" in columns:
+        conn.close()
+        return
+    log.info("Adding also_physical column to books")
+    conn.execute(
+        "ALTER TABLE books ADD COLUMN also_physical INTEGER DEFAULT 0"
     )
     conn.commit()
     conn.close()
@@ -1841,7 +1863,7 @@ def update_book(
         "tags", "date_finished", "published_date",
         "rating", "reading_status", "book_format",
         "progress", "is_favorite", "is_owned",
-        "is_all_time_fav", "is_second_fav",
+        "is_all_time_fav", "is_second_fav", "also_physical",
         "series_ignored", "manual_category",
     }
     filtered = {

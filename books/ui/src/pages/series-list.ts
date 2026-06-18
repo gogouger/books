@@ -2,7 +2,7 @@ import { api } from '../api';
 import { getLibraryUsername } from '../context';
 import { navigate, navigateHome } from '../router';
 import { setAuthorFilter } from './library';
-import { formatBadgeHtml } from '../components/book-card';
+import { formatBadgesHtml } from '../components/book-card';
 import {
     filterBarHtml,
     attachFilterHandlers,
@@ -423,7 +423,7 @@ export function renderStandaloneCard(b: any): string {
         }).join(', ')}</div>`
         : '';
 
-    const fmtBadge = formatBadgeHtml(b.book_format);
+    const fmtBadge = formatBadgesHtml(b);
     const coverHtml = (b.cover_filename && b.cover_user_id != null)
         ? `<div class="series-cover-wrap">
                <img src="${api.coverUrl(b.cover_user_id, b.cover_filename, b.cover_updated_at)}" alt="${escapeHtml(b.title)}" class="series-cover-img" loading="lazy">

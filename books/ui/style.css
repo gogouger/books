@@ -258,6 +258,22 @@ body::before {
 }
 .cover-format-badge .bi { font-size: 0.9rem; }
 
+/* When a book has both audio AND physical, render two badges side by
+   side at the same corner. Container is the absolutely-positioned anchor;
+   individual badges drop back to static so they flow horizontally. */
+.cover-format-badges {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: inline-flex;
+    gap: 3px;
+}
+.cover-format-badges .cover-format-badge {
+    position: static;
+    top: auto;
+    right: auto;
+}
+
 /* Tier border + format pip on the book-detail cover. Mirrors the .book-card
    treatment so the same gem/border reads consistently across views. */
 .detail-cover-wrap { position: relative; display: inline-block; }

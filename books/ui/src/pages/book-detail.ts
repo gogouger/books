@@ -4,7 +4,7 @@ import { getLibraryUsername } from '../context';
 import { navigate, navigateHome } from '../router';
 import { setAuthorFilter, updateCachedBook, invalidateLibraryCache } from './library';
 import { invalidateSeriesCache } from './series-list';
-import { formatBadgeHtml, allTimeFavBadgeHtml } from '../components/book-card';
+import { formatBadgesHtml, allTimeFavBadgeHtml } from '../components/book-card';
 import {
     ratingStarsHtml,
     attachRatingHandler,
@@ -127,7 +127,7 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
     // pip in the top-right corner — single source of truth in book-card.ts.
     const tierClass = book.is_all_time_fav ? ' all-time-fav'
         : book.is_second_fav ? ' second-fav' : '';
-    const fmtBadge = formatBadgeHtml(book.book_format);
+    const fmtBadge = formatBadgesHtml(book);
     const goldGemBadge = allTimeFavBadgeHtml(book);
 
     const coverImg = book.cover_filename

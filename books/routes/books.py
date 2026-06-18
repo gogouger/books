@@ -57,6 +57,7 @@ class BookUpdate(BaseModel):
     is_favorite: bool | None = None
     is_all_time_fav: bool | None = None
     is_second_fav: bool | None = None
+    also_physical: bool | None = None
     is_owned: bool | None = None
     manual_category: str | None = None
 
@@ -565,7 +566,8 @@ def update_book(
         update_data["is_all_time_fav"] = False
         update_data.setdefault("is_favorite", True)
     # Coerce bools to 0/1 since the column is INTEGER.
-    for k in ("is_favorite", "is_all_time_fav", "is_second_fav", "is_owned"):
+    for k in ("is_favorite", "is_all_time_fav", "is_second_fav",
+              "also_physical", "is_owned"):
         if k in update_data and isinstance(update_data[k], bool):
             update_data[k] = 1 if update_data[k] else 0
 

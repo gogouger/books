@@ -42,7 +42,7 @@ export function bookCardHtml(book: any): string {
         ? ' all-time-fav'
         : book.is_second_fav === 1 ? ' second-fav' : '';
 
-    const formatBadge = formatBadgeHtml(book.book_format);
+    const formatBadge = formatBadgesHtml(book);
     const allTimeFav = allTimeFavBadgeHtml(book);
 
     const progressBar = book.reading_status === 'reading' && book.progress
@@ -144,8 +144,12 @@ export function allTimeFavBadgeHtml(b: any): string {
     return '<span class="cover-fav-badge" title="All-time favorite"><i class="bi bi-gem"></i></span>';
 }
 
-// Format pip on the cover corner. Shown on every book — half-open book
-// (physical), headphones (audiobook), tablet (ebook). Helps scan the shelf.
+// Format pip(s) on the cover corner. The book's primary format
+// (`book_format`) drives the main badge — half-open book (physical),
+// headphones (audiobook), tablet (ebook). A second badge sits next to it
+// when `also_physical=1` and the primary is audiobook/ebook — for the
+// books Gordon owns in both audio AND physical (Harry Potter, Wheel of
+// Time, Lightbringer, Ender's series).
 export function formatBadgeHtml(format: string | undefined | null): string {
     if (format === 'physical') {
         return '<span class="cover-format-badge fmt-physical" title="Physical"><i class="bi bi-book-half"></i></span>';
@@ -157,6 +161,15 @@ export function formatBadgeHtml(format: string | undefined | null): string {
         return '<span class="cover-format-badge fmt-ebook" title="Ebook"><i class="bi bi-tablet"></i></span>';
     }
     return '';
+}
+
+export function formatBadgesHtml(book: any): string {
+    const primary = formatBadgeHtml(book.book_format);
+    if (book.also_physical === 1 && book.book_format !== 'physical') {
+        const physical = formatBadgeHtml('physical');
+        return `<span class="cover-format-badges">${primary}${physical}</span>`;
+    }
+    return primary;
 }
 
 // Books whose series position has a fractional part (e.g. 1.5, 0.5 — typically
