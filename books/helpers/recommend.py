@@ -15,10 +15,38 @@ and books the user has explicitly dismissed.
 
 import asyncio
 import logging
+import re
 
 from . import db, hardcover
 
 log = logging.getLogger(__name__)
+
+
+# Reject Hardcover hits that are study guides / summaries / boxed sets /
+# editorial variants. The book itself isn't a real read-this rec.
+_NOISE_RE = re.compile(
+    r"(?ix)"
+    r"(^summary\s+of\b"
+    r"|^summary\s+and\s+analysis\b"
+    r"|\bconversation\s+starters\b"
+    r"|\b(?:dramatized|illustrated|deluxe)\s+adaptation\b"
+    r"|\b\d+\s+books?\s+collection\s+set\b"
+    r"|\bboxed\s+set\b"
+    r"|\bstudy\s+guide\b"
+    r"|\bcliff(?:'s)?notes?\b"
+    r"|\b\d+\s+of\s+\d+\b)"
+)
+
+
+def _is_noise_hit(title: str) -> bool:
+    return bool(_NOISE_RE.search(title or ""))
+
+
+def _author_tokens(name: str) -> set[str]:
+    return {
+        t for t in re.findall(r"[a-z]+", (name or "").lower())
+        if len(t) >= 2
+    }
 
 
 # Caps tuned for the 100-req/15min Hardcover budget. A full rebuild does:
@@ -191,26 +219,37 @@ async def more_from_loved_authors(
 
     for author in author_items:
         try:
+            # Unquoted query — quoting forces an exact-phrase search that
+            # rejects collabs and author-name variants ("B. Sanderson",
+            # "Brandon Sanderson, Tracy Hickman"). Unquoted hits everyone
+            # who shares the tokens; we filter to actual matches below.
             results = await hardcover.search_books(
-                f'"{author["name"]}"', per_page=10
+                author["name"], per_page=15,
             )
         except Exception:
             log.exception("HC author search failed: %s", author["name"])
             continue
         await asyncio.sleep(SLEEP_BETWEEN)
 
+        seed_tokens = _author_tokens(author["name"])
         per_author_count = 0
         for hit in results:
             hc_id = int(hit.get("id") or 0)
             if not hc_id or hc_id in seen_hc_ids or hc_id in dismissed:
                 continue
 
-            # Only books actually attributed to this author
-            hit_author_key = _normalize_author(hit.get("author", ""))
-            if hit_author_key != _normalize_author(author["name"]):
+            # Token-subset match — every word of the seed author must
+            # appear in the hit's author field. Covers collabs and the
+            # "Lastname, Firstname" reorderings.
+            hit_tokens = _author_tokens(hit.get("author", ""))
+            if not seed_tokens or not seed_tokens.issubset(hit_tokens):
                 continue
 
-            title_key = hardcover.normalize_title(hit.get("title", ""))
+            title = hit.get("title", "")
+            if _is_noise_hit(title):
+                continue
+
+            title_key = hardcover.normalize_title(title)
             if title_key in existing_titles:
                 continue
 
@@ -218,7 +257,7 @@ async def more_from_loved_authors(
             recs.append({
                 "kind": "loved_author",
                 "hc_book_id": hc_id,
-                "title": hit["title"],
+                "title": title,
                 "authors": hit["author"],
                 "cover_url": None,
                 "why": (
@@ -252,39 +291,58 @@ async def similar_to_favorites(
 
     for seed in seeds:
         try:
-            results = await hardcover.search_books(seed["title"], per_page=6)
+            results = await hardcover.search_books(seed["title"], per_page=8)
         except Exception:
             log.exception("HC similar search failed: %s", seed["title"])
             continue
         await asyncio.sleep(SLEEP_BETWEEN)
 
         seed_norm = hardcover.normalize_title(seed["title"])
-        seed_author_key = _normalize_author(
+        seed_author_tokens = _author_tokens(
             (seed["authors"] or "").split(",")[0]
         )
 
-        # Pick one non-seed, non-same-author hit per seed
+        # Pick one non-seed, non-same-author, non-noise hit per seed
         for hit in results:
             hc_id = int(hit.get("id") or 0)
             if not hc_id or hc_id in seen_hc_ids or hc_id in dismissed:
                 continue
 
-            hit_title_norm = hardcover.normalize_title(hit.get("title", ""))
+            title = hit.get("title", "")
+            if _is_noise_hit(title):
+                continue
+
+            hit_title_norm = hardcover.normalize_title(title)
             if hit_title_norm == seed_norm:
                 continue
+            # Containment check too — "Mistborn: The Final Empire" should
+            # match the user's "The Final Empire" via subtitle stripping,
+            # but if normalize ever diverges, treat a normalized substring
+            # as a dup. Keeps the surface tighter than == alone.
             if hit_title_norm in existing_titles:
+                continue
+            if any(
+                hit_title_norm and (
+                    hit_title_norm in ex or ex in hit_title_norm
+                )
+                for ex in existing_titles
+                if ex and len(ex) > 4
+            ):
                 continue
 
             # Skip same-author hits — those belong in Row 2
-            hit_author_key = _normalize_author(hit.get("author", ""))
-            if seed_author_key and hit_author_key == seed_author_key:
+            hit_author_tokens = _author_tokens(hit.get("author", ""))
+            if (
+                seed_author_tokens
+                and seed_author_tokens.issubset(hit_author_tokens)
+            ):
                 continue
 
             seen_hc_ids.add(hc_id)
             recs.append({
                 "kind": "similar_to",
                 "hc_book_id": hc_id,
-                "title": hit["title"],
+                "title": title,
                 "authors": hit["author"],
                 "cover_url": None,
                 "why": f"Because you loved “{seed['title']}”",
