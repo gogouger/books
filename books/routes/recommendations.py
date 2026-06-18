@@ -30,11 +30,11 @@ _locks: dict[int, asyncio.Lock] = {}
 async def _build(user_id: int) -> dict:
     dismissed = db.get_dismissed_hc_ids(user_id)
     cont = recommend.next_in_series(user_id)
+    # search_books_rich returns cover_url inline, no separate enrich step.
     loved, similar = await asyncio.gather(
         recommend.more_from_loved_authors(user_id, dismissed),
         recommend.similar_to_favorites(user_id, dismissed),
     )
-    await recommend.enrich_with_covers(loved + similar)
     return {
         "continue": cont,
         "loved_authors": loved,

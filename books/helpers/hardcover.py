@@ -90,6 +90,58 @@ async def search_books(
     return results
 
 
+async def search_books_rich(
+    query: str, per_page: int = 10,
+) -> list[dict]:
+    """Search Hardcover returning the richer doc fields the recs engine
+    needs: full author_names list, series_names, compilation flag,
+    ratings_count, image.url, slug. search_books() collapses these to a
+    minimal dict for legacy callers; the recommendation page needs them
+    inline so we can filter without a second round-trip per hit.
+
+    Returns list of dicts:
+      {id, title, author_names, series_names, compilation,
+       ratings_count, rating, cover_url, slug}.
+    """
+    gql = """
+    {
+      search(query: "%s", query_type: "books", per_page: %d) {
+        results
+      }
+    }
+    """ % (query.replace('"', '\\"'), per_page)
+
+    try:
+        data = await _graphql(gql)
+    except Exception:
+        log.exception("Hardcover rich book search failed for %s", query)
+        return []
+
+    results = []
+    hits = (
+        data.get("data", {})
+        .get("search", {})
+        .get("results", {})
+        .get("hits", [])
+    )
+    for hit in hits:
+        doc = hit.get("document", {})
+        image = doc.get("image") or {}
+        cover_url = image.get("url") if isinstance(image, dict) else None
+        results.append({
+            "id": int(doc["id"]),
+            "title": doc.get("title", ""),
+            "author_names": list(doc.get("author_names") or []),
+            "series_names": list(doc.get("series_names") or []),
+            "compilation": bool(doc.get("compilation")),
+            "ratings_count": int(doc.get("ratings_count") or 0),
+            "rating": doc.get("rating"),
+            "cover_url": cover_url or None,
+            "slug": doc.get("slug", ""),
+        })
+    return results
+
+
 async def fetch_book_detail(book_id: int) -> dict | None:
     """Fetch detailed metadata for a single Hardcover book.
 
