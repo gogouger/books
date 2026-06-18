@@ -66,9 +66,10 @@ _BROAD_GENRES = frozenset({
     "Adventure", "Romance", "Young Adult", "Teen & Young Adult",
     "Young Adult Fiction", "Children's", "Picture Book",
     "Science Fiction & Fantasy",  # the whole bookstore section
+    "Literature & Fiction",  # the other whole-bookstore section
     "Magic",  # too generic — every fantasy book is "magic"
     "Action & Adventure",
-    "General",
+    "General", "Sci-fi",
 })
 
 
@@ -409,11 +410,25 @@ async def similar_to_favorites(
 
         # Hardcover's `genres` array is ordered roughly
         # most-specific-first; take the first 3 non-generic entries per
-        # seed so a seed weighs three buckets rather than one.
+        # seed so a seed weighs three buckets rather than one. A handful
+        # of genres are stored as `|`-joined compound strings ("Literature
+        # & Fiction|Science Fiction & Fantasy") — split those out so each
+        # half counts as its own bucket.
         kept = 0
+        seed_genres: list[str] = []
         for g in match_doc.get("genres") or []:
-            if not g or g in _BROAD_GENRES:
+            # Some `genres` entries are `;`-joined multi-genre dumps
+            # ("Coming of Age; Epic; Action & Adventure; ..."). Treat
+            # those as noise rather than try to split — the meaningful
+            # genres usually appear earlier in the array anyway.
+            if not g or ";" in g:
                 continue
+            for sub in g.split("|"):
+                sub = sub.strip()
+                if not sub or sub in _BROAD_GENRES:
+                    continue
+                seed_genres.append(sub)
+        for g in seed_genres:
             bucket = genre_to_seeds.setdefault(g, [])
             if seed["title"] not in bucket:
                 bucket.append(seed["title"])
