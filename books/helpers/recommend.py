@@ -105,6 +105,10 @@ def next_in_series(user_id: int) -> list[dict]:
         FROM user_series us
         JOIN series_link sl ON sl.id = us.series_link_id
         JOIN (
+            -- Whole-number positions only: novellas / side stories live
+            -- at fractional indices (1.1, 3.5) and the library already
+            -- hides them. Surfacing them here would push "A War of Gifts"
+            -- (Ender 1.1) ahead of the real next mainline book.
             SELECT b.series_link_id, MIN(b.series_index) AS min_idx
             FROM books b
             WHERE b.user_id = ?
@@ -112,6 +116,7 @@ def next_in_series(user_id: int) -> list[dict]:
               AND b.series_link_id IS NOT NULL
               AND b.series_index IS NOT NULL
               AND b.series_index >= 1
+              AND b.series_index = CAST(b.series_index AS INTEGER)
             GROUP BY b.series_link_id
         ) nxt ON nxt.series_link_id = us.series_link_id
         JOIN books b_next
