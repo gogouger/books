@@ -1,5 +1,9 @@
 export type LibraryView = 'books-grouped' | 'books-flat';
-export type LibraryCategory = 'all' | 'Religious' | 'Fiction';
+export type LibraryCategory =
+    | 'all'
+    | 'Religious'
+    | 'Religious-commentary'
+    | 'Fiction';
 
 export interface FilterState {
     q: string;
@@ -27,6 +31,9 @@ export const VIEW_OPTIONS: ViewOption[] = [
 export const CATEGORY_OPTIONS: CategoryOption[] = [
     { value: 'all', label: 'All categories' },
     { value: 'Religious', label: 'Religious' },
+    // Nested under Religious — the leading "  └ " is the visual cue that
+    // it's a sub-shelf of Religious (commentaries also have tag=commentary).
+    { value: 'Religious-commentary', label: '  └ Commentaries' },
     { value: 'Fiction', label: 'Fiction' },
 ];
 
@@ -45,8 +52,6 @@ const DEFAULT_FILTER_OPTIONS: FilterOption[] = [
     { value: 'fmt_physical', label: 'Physical' },
     { value: 'fmt_ebook', label: 'Ebook' },
     { value: '_hr4', label: '', hr: true },
-    { value: 'tag_commentary', label: 'Commentaries' },
-    { value: '_hr5', label: '', hr: true },
     { value: 'favorites', label: 'Favorites' },
     { value: '1star', label: '1 star' },
     { value: '2star', label: '2 stars' },

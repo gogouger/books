@@ -425,37 +425,76 @@ body::before {
 /* Filter bar */
 .filter-bar {
     background: var(--panel-bg);
-    border-radius: 8px;
-    padding: 1rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 10px;
+    padding: 0.65rem 0.85rem;
     margin-bottom: 1rem;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .filter-bar .form-control,
-.filter-bar .form-select {
-    font-size: 0.9rem;
+.filter-bar .form-select,
+.filter-bar .btn {
+    font-size: 0.85rem;
+    padding: 0.35rem 2rem 0.35rem 0.7rem;
+    border-radius: 7px;
+    border-color: var(--bs-border-color);
+    background-color: var(--bs-body-bg);
+    transition: border-color 0.12s, box-shadow 0.12s;
+    min-height: 34px;
+}
+.filter-bar .btn {
+    padding: 0.35rem 0.7rem;  /* buttons don't have the select-arrow gutter */
+}
+.filter-bar .form-control:hover,
+.filter-bar .form-select:hover,
+.filter-bar .btn:hover {
+    border-color: var(--bs-secondary-color);
+}
+.filter-bar .form-control:focus,
+.filter-bar .form-select:focus,
+.filter-bar .btn:focus {
+    border-color: var(--bs-link-color);
+    box-shadow: 0 0 0 0.15rem color-mix(in srgb, var(--bs-link-color) 22%, transparent);
 }
 
+/* Selects: lighter background-image for the chevron, monospace-aligned. */
+.filter-bar .form-select {
+    background-position: right 0.5rem center;
+    background-size: 14px 10px;
+    cursor: pointer;
+}
+
+/* Search input chrome: rounded with a subtle inset, paired with the
+   X clear button anchored inside. */
 #filter-search {
     padding-right: 2rem;
+    min-width: 200px;
 }
 
 .btn-search-clear {
     position: absolute;
-    right: 8px;
+    right: 10px;
     top: 50%;
     transform: translateY(-50%);
     background: none;
     border: none;
-    padding: 0 4px;
+    padding: 2px 6px;
     color: var(--bs-secondary-color);
     cursor: pointer;
     line-height: 1;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
+    border-radius: 4px;
 }
-
 .btn-search-clear:hover {
     color: var(--bs-body-color);
+    background: var(--bs-tertiary-bg);
+}
+
+.filter-bar .pagination-info {
+    font-size: 0.8rem;
+    color: var(--bs-secondary-color);
+    font-variant-numeric: tabular-nums;
 }
 
 /* Book detail */

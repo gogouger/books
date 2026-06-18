@@ -232,7 +232,10 @@ async function renderBooksView(): Promise<void> {
 function applyClientCategoryFilter(books: any[]): any[] {
     const cat = currentState.category || 'all';
     if (cat === 'all') return books;
-    return books.filter(b => b.manual_category === cat);
+    // Compound categories: "Religious-commentary" → manual_category=Religious;
+    // the tag filter is applied server-side, so just bucket by the parent here.
+    const parent = cat.includes('-') ? cat.split('-')[0] : cat;
+    return books.filter(b => b.manual_category === parent);
 }
 
 async function loadMoreBooks(): Promise<void> {
@@ -283,6 +286,13 @@ async function loadMoreBooks(): Promise<void> {
         };
         if (currentState.q) params.q = currentState.q;
         if (currentState.rated !== null) params.rated = currentState.rated;
+
+        // Compound categories like "Religious-commentary" carry their tag
+        // server-side; the parent-category filtering is still client-side.
+        const cat = currentState.category || 'all';
+        if (cat.includes('-')) {
+            params.tag = cat.split('-')[1];
+        }
 
         // Map filter dropdown to API params
         const f = currentState.filter;
