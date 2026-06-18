@@ -240,6 +240,7 @@ def init_db() -> None:
     _migrate_book_format()
     _migrate_also_physical()
     _migrate_user_series_rating()
+    _migrate_recommendation_dismissals()
     _migrate_review()
     _migrate_manual_category()
     _migrate_series_entries_cover_url()
@@ -630,6 +631,45 @@ def _migrate_book_format() -> None:
     log.info("Adding book_format column to books")
     conn.execute(
         "ALTER TABLE books ADD COLUMN book_format TEXT DEFAULT 'ebook'"
+    )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_recommendation_dismissals() -> None:
+    """One-row-per-dismissal table for the /recommendations page so a
+    "not interested" click doesn't re-surface the book on every reload."""
+    conn = get_db()
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS recommendation_dismissals (
+            user_id INTEGER NOT NULL,
+            hc_book_id INTEGER NOT NULL,
+            dismissed_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, hc_book_id)
+        )"""
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_dismissed_hc_ids(user_id: int) -> set[int]:
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT hc_book_id FROM recommendation_dismissals"
+        " WHERE user_id = ?",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    return {int(r["hc_book_id"]) for r in rows}
+
+
+def dismiss_recommendation(user_id: int, hc_book_id: int) -> None:
+    from datetime import datetime, timezone
+    conn = get_db()
+    conn.execute(
+        "INSERT OR IGNORE INTO recommendation_dismissals"
+        " (user_id, hc_book_id, dismissed_at) VALUES (?, ?, ?)",
+        (user_id, hc_book_id, datetime.now(timezone.utc).isoformat()),
     )
     conn.commit()
     conn.close()

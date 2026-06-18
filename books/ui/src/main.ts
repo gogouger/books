@@ -11,6 +11,7 @@ import { renderSeriesEdit } from './pages/series-edit';
 import { renderAddBook } from './pages/add-book';
 import { renderBookEdit } from './pages/book-edit';
 import { renderScanBooks } from './pages/scan';
+import { renderRecommendations } from './pages/recommendations';
 
 initThemeToggle();
 
@@ -56,6 +57,7 @@ initThemeToggle();
     addRoute('/series/:id/edit', (p) => renderSeriesEdit(p));
     addRoute('/series/:id', (p) => renderSeriesView(p));
     addRoute('/library', (p) => renderLibrary(p));
+    addRoute('/recommendations', (_p) => renderRecommendations());
     addRoute('/add', (p) => renderAddBook(p));
     addRoute('/scan', (_p) => renderScanBooks());
 

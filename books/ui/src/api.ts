@@ -286,6 +286,34 @@ export const api = {
         });
     },
 
+    async getRecommendations(username: string): Promise<any> {
+        return apiFetch(`/${username}/recommendations`);
+    },
+
+    async dismissRecommendation(
+        username: string, hcBookId: number,
+    ): Promise<any> {
+        return apiFetch(`/${username}/recommendations/dismiss`, {
+            method: 'POST',
+            body: JSON.stringify({ hc_book_id: hcBookId }),
+        });
+    },
+
+    async addRecommendationToLibrary(
+        username: string, hcBookId: number,
+    ): Promise<any> {
+        return apiFetch(`/${username}/recommendations/add-from-hc`, {
+            method: 'POST',
+            body: JSON.stringify({ hc_book_id: hcBookId }),
+        });
+    },
+
+    async refreshRecommendations(username: string): Promise<any> {
+        return apiFetch(`/${username}/recommendations/refresh`, {
+            method: 'POST',
+        });
+    },
+
     async deleteBook(username: string, bookId: number): Promise<any> {
         return apiFetch(`/${username}/books/${bookId}`, {
             method: 'DELETE',
