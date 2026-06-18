@@ -3753,19 +3753,23 @@ def update_book_sync(
 
 
 def prune_empty_series_links() -> int:
-    """Drop series_link rows that no user owns any book in.
+    """Drop series_link rows no user has any *engagement* with.
 
-    user_series + series_entries are cleaned up by the FK cascade; this
-    just removes the parent series_link row. Run after the series sync
-    so wrongly-linked books that the user has since unlinked don't
-    leave a phantom series rendering on the home page.
+    "Engagement" = the row is referenced by at least one book that is
+    owned OR read/reading. The original predicate required is_owned=1
+    only, which nuked series where every book was a library/borrowed
+    read (is_owned=0, reading_status='read') — a real pattern that
+    cost ~50 series-links the first time the sweep ran.
+
+    Cascade still handles user_series + series_entries.
     """
     conn = get_db()
     cur = conn.execute(
         "DELETE FROM series_link"
         " WHERE id NOT IN ("
         "    SELECT DISTINCT series_link_id FROM books"
-        "    WHERE series_link_id IS NOT NULL AND is_owned = 1"
+        "    WHERE series_link_id IS NOT NULL"
+        "      AND (is_owned = 1 OR reading_status IN ('read', 'reading'))"
         " )"
     )
     pruned = cur.rowcount
