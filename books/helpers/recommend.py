@@ -73,6 +73,7 @@ _BROAD_GENRES = frozenset({
     # Non-English variants leak through Hardcover's tags; treat as
     # broad rather than try to translate them.
     "Adulte", "Roman", "Fantastico", "Bambini",
+    "Aventure", "Aventures", "Romanzo", "Ficción",
 })
 
 
