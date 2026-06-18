@@ -5,9 +5,6 @@ export interface BookGridOptions {
     grouped?: boolean;  // emit per-series section headers
 }
 
-// Groups longer than this start collapsed in the grouped library view.
-const COLLAPSE_THRESHOLD = 6;
-
 export function bookGridHtml(
     books: any[],
     opts: BookGridOptions = {},
@@ -27,7 +24,10 @@ export function bookGridHtml(
 
     // Grouped: drop unread novellas (fractional series_index, not yet read),
     // bucket by series_link_id preserving caller sort, then emit heading +
-    // grid + optional "Show all N" toggle when the group is long.
+    // grid + a "Show all N" toggle for every group with > 1 book. The actual
+    // first-row-only collapse is applied by applyRowCollapse() after mount,
+    // which knows the rendered grid width and trims to exactly one row's
+    // worth of cards.
     const filtered = books.filter(b => !isHiddenShortStory(b));
     const groupOrder: string[] = [];
     const groupMap: Record<string, { heading: string; books: any[] }> = {};
@@ -48,26 +48,14 @@ export function bookGridHtml(
     for (const key of groupOrder) {
         const g = groupMap[key];
         out += `<h4 class="library-group-heading">${escapeHtml(g.heading)}</h4>`;
-        out += '<div class="book-grid">';
-        const long = g.books.length > COLLAPSE_THRESHOLD;
-        for (let i = 0; i < g.books.length; i++) {
-            const card = bookCardHtml(g.books[i]);
-            out += (long && i >= COLLAPSE_THRESHOLD)
-                ? withClass(card, 'series-collapsed-extra')
-                : card;
-        }
+        out += '<div class="book-grid" data-collapsible="1">';
+        for (const b of g.books) out += bookCardHtml(b);
         out += '</div>';
-        if (long) {
-            out += `<button type="button" class="btn btn-link btn-sm series-expand-toggle" data-total="${g.books.length}">Show all ${g.books.length}</button>`;
+        if (g.books.length > 1) {
+            out += `<button type="button" class="btn btn-link btn-sm series-expand-toggle" data-total="${g.books.length}" hidden>Show all ${g.books.length}</button>`;
         }
     }
     return out;
-}
-
-// Inject an extra class onto the .book-card root emitted by bookCardHtml.
-// The card opens with `class="book-card card...`; slot the new class in.
-function withClass(html: string, cls: string): string {
-    return html.replace('class="book-card card', `class="book-card card ${cls}`);
 }
 
 function escapeHtml(text: string): string {
@@ -116,6 +104,57 @@ export function attachGridClickHandlers(
             const total = btn.dataset.total || '0';
             btn.textContent = expanding ? 'Collapse' : `Show all ${total}`;
         });
+    });
+
+    // Trim each collapsible grid to one row's worth of cards, based on how
+    // many the current viewport actually fits. Run on mount and on resize.
+    applyRowCollapse(container);
+    bindResizeRecollapse(container);
+}
+
+// Hide the past-first-row cards in each collapsible grid. Reads the grid's
+// computed grid-template-columns so it lines up with whatever CSS @media
+// breakpoint is active (180px min on desktop, 140px on mobile).
+function applyRowCollapse(container: HTMLElement): void {
+    const grids = container.querySelectorAll<HTMLElement>(
+        '.book-grid[data-collapsible="1"]'
+    );
+    grids.forEach(grid => {
+        // Skip expanded grids — leave them as-is until the user collapses.
+        if (grid.classList.contains('series-expanded')) return;
+
+        const cards = grid.querySelectorAll<HTMLElement>('.book-card');
+        if (!cards.length) return;
+
+        // Number of resolved column tracks = how many cards fit per row.
+        const tracks = getComputedStyle(grid)
+            .gridTemplateColumns
+            .split(/\s+/)
+            .filter(s => s && s !== '0px').length;
+        const perRow = Math.max(1, tracks);
+
+        // First-pass clear, then re-apply so resize handles both grow & shrink.
+        cards.forEach(c => c.classList.remove('series-collapsed-extra'));
+        for (let i = perRow; i < cards.length; i++) {
+            cards[i].classList.add('series-collapsed-extra');
+        }
+
+        const toggle = grid.nextElementSibling as HTMLElement | null;
+        if (toggle && toggle.classList.contains('series-expand-toggle')) {
+            toggle.hidden = cards.length <= perRow;
+        }
+    });
+}
+
+// Re-run applyRowCollapse on viewport resize. Debounced; idempotent.
+let resizeBound = false;
+function bindResizeRecollapse(container: HTMLElement): void {
+    if (resizeBound) return;
+    resizeBound = true;
+    let t: number | undefined;
+    window.addEventListener('resize', () => {
+        if (t) window.clearTimeout(t);
+        t = window.setTimeout(() => applyRowCollapse(container), 120);
     });
 }
 
