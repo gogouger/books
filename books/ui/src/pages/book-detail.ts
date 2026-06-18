@@ -335,7 +335,15 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
 
     document.getElementById('back-to-library')!.addEventListener('click', (e) => {
         e.preventDefault();
-        navigateHome();
+        // Go back through browser history so the user lands on whatever
+        // page they came from (library with filters + scroll position,
+        // series detail, favs, etc). Falls back to /library if there's
+        // no history entry (e.g. opened the book directly via URL).
+        if (window.history.length > 1) {
+            window.history.back();
+        } else {
+            navigate('#/library');
+        }
     });
 
     app.querySelectorAll('.author-link').forEach(link => {
@@ -344,7 +352,7 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
             const author = (link as HTMLElement).dataset.author || '';
             if (author) {
                 setAuthorFilter(author);
-                navigateHome();
+                navigate('#/library');
             }
         });
     });
