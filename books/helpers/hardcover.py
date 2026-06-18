@@ -181,6 +181,9 @@ async def top_books_by_genre(
         contributions(limit: 1) {
           author { name }
         }
+        book_series(limit: 3) {
+          series { name }
+        }
       }
     }
     """ % (limit, min_users, safe_genre)
@@ -199,6 +202,11 @@ async def top_books_by_genre(
             contribs[0]["author"]["name"]
             if contribs and contribs[0].get("author") else ""
         )
+        series_names = [
+            bs["series"]["name"]
+            for bs in (b.get("book_series") or [])
+            if bs.get("series", {}).get("name")
+        ]
         results.append({
             "id": int(b["id"]),
             "title": b.get("title", ""),
@@ -208,6 +216,7 @@ async def top_books_by_genre(
             "ratings_count": int(b.get("ratings_count") or 0),
             "cover_url": cover_url or None,
             "slug": b.get("slug", ""),
+            "series_names": series_names,
         })
     return results
 

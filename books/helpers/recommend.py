@@ -109,6 +109,34 @@ def _existing_title_keys(user_id: int) -> tuple[set[str], set[str]]:
     return normalized, loose
 
 
+def _existing_series_keys(user_id: int) -> set[str]:
+    """Lowercase-stripped series names the user already has books in.
+
+    Cross-edition dedup: 'Harry Potter and the Philosopher's Stone' (UK)
+    and 'Harry Potter and the Sorcerer's Stone' (US) have different
+    normalized titles but share the series name 'Harry Potter'. Same
+    for 'Mistborn: The Final Empire' vs 'The Final Empire'. Comparing
+    each candidate's series_names against this set catches both.
+    """
+    conn = db.get_db()
+    rows = conn.execute(
+        """
+        SELECT DISTINCT COALESCE(b.series, sl.series_name) AS s
+        FROM books b
+        LEFT JOIN series_link sl ON sl.id = b.series_link_id
+        WHERE b.user_id = ?
+          AND COALESCE(b.series, sl.series_name) IS NOT NULL
+        """,
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    return {
+        (r["s"] or "").strip().lower()
+        for r in rows
+        if r["s"]
+    }
+
+
 def gather_seeds(user_id: int) -> dict:
     """Tier signals: gold/silver/5★ books and series."""
     conn = db.get_db()
@@ -251,6 +279,7 @@ async def more_from_loved_authors(
 
     author_items = list(authors.values())[:AUTHOR_CAP]
     existing_norm, existing_loose = _existing_title_keys(user_id)
+    existing_series = _existing_series_keys(user_id)
 
     recs: list[dict] = []
     seen_hc_ids: set[int] = set()
@@ -317,6 +346,16 @@ async def more_from_loved_authors(
                 for ex in existing_loose
             ):
                 continue
+            # Series-name dedup: catches UK/US edition forks like
+            # 'Philosopher's Stone' vs 'Sorcerer's Stone' that share a
+            # series the user already owns books in.
+            hit_series = {
+                (s or "").strip().lower()
+                for s in hit.get("series_names") or []
+                if s
+            }
+            if hit_series and hit_series & existing_series:
+                continue
 
             primary_author = ", ".join(names) or author["name"]
 
@@ -370,6 +409,7 @@ async def similar_to_favorites(
         return []
 
     existing_norm, existing_loose = _existing_title_keys(user_id)
+    existing_series = _existing_series_keys(user_id)
 
     # Seed authors — anything by them surfaces in Row 2; don't double up.
     seed_author_tokens: set[str] = set()
@@ -485,6 +525,16 @@ async def similar_to_favorites(
             # Skip authors already represented in Row 2
             author_tokens = _author_tokens(b.get("primary_author", ""))
             if author_tokens and author_tokens.issubset(seed_author_tokens):
+                continue
+
+            # Series-name dedup — UK/US edition forks ("Philosopher's"
+            # vs "Sorcerer's"), Mistborn omnibus, etc.
+            hit_series = {
+                (s or "").strip().lower()
+                for s in b.get("series_names") or []
+                if s
+            }
+            if hit_series and hit_series & existing_series:
                 continue
 
             seen_hc_ids.add(hc_id)
