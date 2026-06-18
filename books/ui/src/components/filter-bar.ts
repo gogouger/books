@@ -45,6 +45,8 @@ const DEFAULT_FILTER_OPTIONS: FilterOption[] = [
     { value: 'fmt_physical', label: 'Physical' },
     { value: 'fmt_ebook', label: 'Ebook' },
     { value: '_hr4', label: '', hr: true },
+    { value: 'tag_commentary', label: 'Commentaries' },
+    { value: '_hr5', label: '', hr: true },
     { value: 'favorites', label: 'Favorites' },
     { value: '1star', label: '1 star' },
     { value: '2star', label: '2 stars' },

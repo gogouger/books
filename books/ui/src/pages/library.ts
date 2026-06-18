@@ -299,6 +299,8 @@ async function loadMoreBooks(): Promise<void> {
             params.is_favorite = true;
         } else if (f.startsWith('fmt_')) {
             params.book_format = f.slice('fmt_'.length);
+        } else if (f.startsWith('tag_')) {
+            params.tag = f.slice('tag_'.length);
         } else if (f.endsWith('star')) {
             const stars = parseInt(f);
             params.min_rating = stars;
@@ -318,6 +320,7 @@ async function loadMoreBooks(): Promise<void> {
                 currentState.filter === 'favorites' ||
                 currentState.filter === 'no_ghosts' ||
                 currentState.filter.startsWith('fmt_') ||
+                currentState.filter.startsWith('tag_') ||
                 currentState.filter.endsWith('star')
             );
             if (!filterHidesGhosts) params.include_ghosts = true;

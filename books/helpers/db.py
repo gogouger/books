@@ -1362,6 +1362,7 @@ def get_books(
     rated: bool | None = None,
     letter: str | None = None,
     book_format: str | None = None,
+    tag: str | None = None,
     sort: str = "title",
     order: str = "asc",
     limit: int = 50,
@@ -1417,6 +1418,10 @@ def get_books(
     if book_format is not None:
         conditions.append("book_format = ?")
         params.append(book_format)
+
+    if tag:
+        conditions.append("tags LIKE ?")
+        params.append(f'%"{tag}"%')
 
     if has_series is not None:
         if has_series:
@@ -1487,6 +1492,7 @@ def count_books(
     rated: bool | None = None,
     letter: str | None = None,
     book_format: str | None = None,
+    tag: str | None = None,
 ) -> int:
     conditions = [
         "user_id = ?", "series_ignored = 0",
@@ -1538,6 +1544,10 @@ def count_books(
     if book_format is not None:
         conditions.append("book_format = ?")
         params.append(book_format)
+
+    if tag:
+        conditions.append("tags LIKE ?")
+        params.append(f'%"{tag}"%')
 
     if has_series is not None:
         if has_series:

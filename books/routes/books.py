@@ -121,6 +121,7 @@ def list_books(
     has_series: bool | None = None,
     rated: bool | None = None,
     book_format: str | None = None,
+    tag: str | None = None,
     sort: str = "title",
     order: str = "asc",
     limit: int = Query(default=50, le=1000),
@@ -156,6 +157,7 @@ def list_books(
         has_series=effective_has_series,
         rated=rated,
         book_format=book_format,
+        tag=tag,
         sort=effective_sort,
         order=order,
         limit=limit,
@@ -173,6 +175,7 @@ def list_books(
         has_series=effective_has_series,
         rated=rated,
         book_format=book_format,
+        tag=tag,
     )
 
     if grouped:
