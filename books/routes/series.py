@@ -87,6 +87,10 @@ def get_series(
         "series": series_name,
         "monitored": bool(us.get("monitored", 1)),
         "series_complete": bool(us.get("series_complete", 1)),
+        "user_rating": us.get("rating"),
+        "is_favorite": int(us.get("is_favorite") or 0) == 1,
+        "is_all_time_fav": int(us.get("is_all_time_fav") or 0) == 1,
+        "is_second_fav": int(us.get("is_second_fav") or 0) == 1,
         "hardcover_url": (
             f"https://hardcover.app/series/{hardcover_slug}"
             if hardcover_slug else None
@@ -152,6 +156,10 @@ class SeriesUpdate(BaseModel):
     series_name: str | None = None
     monitored: bool | None = None
     series_complete: bool | None = None
+    rating: float | None = None
+    is_favorite: bool | None = None
+    is_all_time_fav: bool | None = None
+    is_second_fav: bool | None = None
     entries: list[EntryUpdate] | None = None
     book_ignores: list[BookIgnore] | None = None
 
@@ -183,6 +191,27 @@ def update_series(
         db.update_series_complete(
             user_id, series_link_id, updates.series_complete
         )
+
+    # Rating + favorite + tier — same model as book-level toggles, single
+    # call covers all four to keep the invariants (gold ⇒ favorite,
+    # silver ⇒ favorite, mutual exclusion) consistent.
+    rating_or_fav = (
+        updates.rating is not None
+        or updates.is_favorite is not None
+        or updates.is_all_time_fav is not None
+        or updates.is_second_fav is not None
+    )
+    if rating_or_fav:
+        fields: dict = {}
+        if updates.rating is not None:
+            fields["rating"] = updates.rating
+        if updates.is_favorite is not None:
+            fields["is_favorite"] = updates.is_favorite
+        if updates.is_all_time_fav is not None:
+            fields["is_all_time_fav"] = updates.is_all_time_fav
+        if updates.is_second_fav is not None:
+            fields["is_second_fav"] = updates.is_second_fav
+        db.update_user_series_fields(user_id, series_link_id, fields)
 
     if updates.entries:
         for entry in updates.entries:

@@ -239,6 +239,7 @@ def init_db() -> None:
     _migrate_series_complete()
     _migrate_book_format()
     _migrate_also_physical()
+    _migrate_user_series_rating()
     _migrate_review()
     _migrate_manual_category()
     _migrate_series_entries_cover_url()
@@ -631,6 +632,32 @@ def _migrate_book_format() -> None:
         "ALTER TABLE books ADD COLUMN book_format TEXT DEFAULT 'ebook'"
     )
     conn.commit()
+    conn.close()
+
+
+def _migrate_user_series_rating() -> None:
+    """Add per-user series ratings + favorite/tier flags on user_series."""
+    conn = get_db()
+    cols = {
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(user_series)"
+        ).fetchall()
+    }
+    add = []
+    if "rating" not in cols:
+        add.append("ALTER TABLE user_series ADD COLUMN rating REAL")
+    if "is_favorite" not in cols:
+        add.append("ALTER TABLE user_series ADD COLUMN is_favorite INTEGER DEFAULT 0")
+    if "is_all_time_fav" not in cols:
+        add.append("ALTER TABLE user_series ADD COLUMN is_all_time_fav INTEGER DEFAULT 0")
+    if "is_second_fav" not in cols:
+        add.append("ALTER TABLE user_series ADD COLUMN is_second_fav INTEGER DEFAULT 0")
+    if add:
+        log.info("Adding rating/favorite columns to user_series")
+        for stmt in add:
+            conn.execute(stmt)
+        conn.commit()
     conn.close()
 
 
@@ -2241,6 +2268,10 @@ def get_series_list(
                       sl.series_name) as series,
                   us.monitored,
                   us.series_complete,
+                  us.rating as user_rating,
+                  us.is_favorite,
+                  us.is_all_time_fav,
+                  us.is_second_fav,
                   COUNT(*) as total_books,
                   SUM(CASE WHEN b.reading_status = 'read'
                       THEN 1 ELSE 0 END) as read_count,
@@ -3515,6 +3546,49 @@ def update_series_complete(
     )
     conn.commit()
     conn.close()
+
+
+def update_user_series_fields(
+    user_id: int,
+    series_link_id: int,
+    fields: dict,
+) -> bool:
+    """Patch arbitrary fields on user_series. Filters by an allow-list.
+
+    Use this for the rating + favorite + tier toggles on the series view —
+    same pattern as db.update_book. Pass {"rating": 5, "is_favorite": True}.
+    """
+    allowed = {
+        "rating", "is_favorite", "is_all_time_fav", "is_second_fav",
+        "monitored", "series_complete", "display_name",
+    }
+    filtered = {k: v for k, v in fields.items() if k in allowed}
+    # Coerce bools to 0/1 for INTEGER columns
+    for k in ("is_favorite", "is_all_time_fav", "is_second_fav",
+              "monitored", "series_complete"):
+        if k in filtered and isinstance(filtered[k], bool):
+            filtered[k] = 1 if filtered[k] else 0
+    # Mutual exclusion + favorite implication (matches book Tier handler)
+    if filtered.get("is_all_time_fav"):
+        filtered["is_favorite"] = 1
+        filtered["is_second_fav"] = 0
+    if filtered.get("is_second_fav"):
+        filtered["is_all_time_fav"] = 0
+        filtered.setdefault("is_favorite", 1)
+    if not filtered:
+        return False
+    sets = ", ".join(f"{k} = ?" for k in filtered)
+    values = list(filtered.values()) + [user_id, series_link_id]
+    conn = get_db()
+    cursor = conn.execute(
+        f"UPDATE user_series SET {sets}"
+        f" WHERE user_id = ? AND series_link_id = ?",
+        values,
+    )
+    conn.commit()
+    changed = cursor.rowcount > 0
+    conn.close()
+    return changed
 
 
 def update_series_entry(

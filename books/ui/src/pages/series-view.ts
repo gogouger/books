@@ -111,6 +111,19 @@ export async function renderSeriesView(
                    <i class="bi bi-box-arrow-up-right"></i> Goodreads
                </a>`;
 
+        const userRating: number | null = data.user_rating ?? null;
+        const isFavorite: boolean = !!data.is_favorite;
+        const isAllTimeFav: boolean = !!data.is_all_time_fav;
+        const isSecondFav: boolean = !!data.is_second_fav;
+
+        const ratingControls = isOwner
+            ? renderSeriesRatingControls(userRating, isFavorite, isAllTimeFav, isSecondFav)
+            : renderSeriesRatingReadonly(userRating, isFavorite, isAllTimeFav, isSecondFav);
+
+        const tierClass =
+            isAllTimeFav ? ' series-header--gold'
+            : isSecondFav ? ' series-header--silver' : '';
+
         let html = `
             <div class="d-flex align-items-center flex-wrap gap-1 mb-3">
                 <a href="#/series" class="btn btn-outline-secondary btn-sm">
@@ -123,7 +136,10 @@ export async function renderSeriesView(
                 ${hcLink}
                 ${grLink}
             </div>
-            <h4 class="mb-3">${escapeHtml(seriesName)}</h4>
+            <div class="series-header${tierClass} mb-3">
+                <h4 class="mb-0">${escapeHtml(seriesName)}</h4>
+                ${ratingControls}
+            </div>
             <div class="text-muted mb-2">
                 ${totalSlots} book${totalSlots !== 1 ? 's' : ''}
                 &middot; ${readCount}/${books.length} read${notOwnedLabel}${ghostLabel}
@@ -139,6 +155,19 @@ export async function renderSeriesView(
             setAuthorFilter(author);
             navigateHome();
         });
+
+        // Series-level rating + favorite + tier handlers (owner-only)
+        if (isOwner) {
+            attachSeriesRatingHandlers(app, async (patch) => {
+                try {
+                    await api.updateSeries(username, seriesId, patch);
+                    invalidateSeriesCache();
+                    renderSeriesView(params);
+                } catch (e: any) {
+                    alert(`Failed to update: ${e.message}`);
+                }
+            });
+        }
 
         const monitorToggle = app.querySelector('#monitor-toggle');
         if (monitorToggle) {
@@ -229,4 +258,103 @@ function escapeHtml(text: string): string {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// ─── series-level rating + favorite + tier controls ──────────────────
+
+function renderStars(rating: number | null, editable: boolean): string {
+    const r = rating ?? 0;
+    const inputs: string[] = [];
+    for (let i = 1; i <= 5; i++) {
+        const filled = i <= r;
+        const icon = filled ? 'bi-star-fill' : 'bi-star';
+        const cls = filled ? 'series-star filled' : 'series-star';
+        if (editable) {
+            inputs.push(`<button type="button" class="${cls}" data-rate="${i}" title="${i} star${i !== 1 ? 's' : ''}"><i class="bi ${icon}"></i></button>`);
+        } else {
+            inputs.push(`<span class="${cls}"><i class="bi ${icon}"></i></span>`);
+        }
+    }
+    return `<span class="series-stars" data-rating="${r}">${inputs.join('')}</span>`;
+}
+
+function renderSeriesRatingControls(
+    rating: number | null,
+    isFavorite: boolean,
+    isAllTime: boolean,
+    isSecond: boolean,
+): string {
+    const heartIcon = isFavorite ? 'bi-heart-fill' : 'bi-heart';
+    const heartCls = isFavorite ? 'series-fav-btn is-on' : 'series-fav-btn';
+    const goldCls = isAllTime ? 'series-tier-btn series-tier-btn--gold is-on' : 'series-tier-btn series-tier-btn--gold';
+    const silverCls = isSecond ? 'series-tier-btn series-tier-btn--silver is-on' : 'series-tier-btn series-tier-btn--silver';
+    return `
+        <div class="series-rating-row">
+            ${renderStars(rating, true)}
+            <button type="button" class="${heartCls}" id="series-fav-toggle" title="Like series">
+                <i class="bi ${heartIcon}"></i>
+            </button>
+            <button type="button" class="${silverCls}" id="series-silver-toggle" title="Mark as 2nd favorite (silver)">
+                <i class="bi bi-gem"></i>
+            </button>
+            <button type="button" class="${goldCls}" id="series-gold-toggle" title="Mark as all-time favorite (gold)">
+                <i class="bi bi-trophy-fill"></i>
+            </button>
+        </div>
+    `;
+}
+
+function renderSeriesRatingReadonly(
+    rating: number | null,
+    isFavorite: boolean,
+    isAllTime: boolean,
+    isSecond: boolean,
+): string {
+    if (!rating && !isFavorite && !isAllTime && !isSecond) return '';
+    const heart = isFavorite
+        ? '<span class="series-fav-btn is-on" title="Favorite"><i class="bi bi-heart-fill"></i></span>'
+        : '';
+    const tier = isAllTime
+        ? '<span class="series-tier-btn series-tier-btn--gold is-on" title="All-time fav"><i class="bi bi-trophy-fill"></i></span>'
+        : isSecond
+            ? '<span class="series-tier-btn series-tier-btn--silver is-on" title="2nd fav"><i class="bi bi-gem"></i></span>'
+            : '';
+    return `<div class="series-rating-row">${renderStars(rating, false)}${heart}${tier}</div>`;
+}
+
+function attachSeriesRatingHandlers(
+    app: HTMLElement,
+    onChange: (patch: Record<string, any>) => void | Promise<void>,
+): void {
+    const stars = app.querySelector<HTMLElement>('.series-stars');
+    if (stars) {
+        stars.querySelectorAll<HTMLButtonElement>('.series-star[data-rate]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const next = parseInt(btn.dataset.rate || '0', 10);
+                const current = parseInt(stars.dataset.rating || '0', 10);
+                // Clicking the existing rating clears it.
+                onChange({ rating: next === current ? null : next });
+            });
+        });
+    }
+    app.querySelector('#series-fav-toggle')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const on = (e.currentTarget as HTMLElement).classList.contains('is-on');
+        onChange({ is_favorite: !on });
+    });
+    app.querySelector('#series-silver-toggle')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const on = (e.currentTarget as HTMLElement).classList.contains('is-on');
+        onChange(on
+            ? { is_second_fav: false }
+            : { is_second_fav: true, is_all_time_fav: false });
+    });
+    app.querySelector('#series-gold-toggle')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const on = (e.currentTarget as HTMLElement).classList.contains('is-on');
+        onChange(on
+            ? { is_all_time_fav: false }
+            : { is_all_time_fav: true, is_second_fav: false });
+    });
 }

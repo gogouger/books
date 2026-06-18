@@ -639,6 +639,106 @@ body::before {
     opacity: 0.55;
 }
 
+/* ─────────────────────────────────────────────────────────────────────
+   Series-level rating + favorite + tier widget
+   ───────────────────────────────────────────────────────────────────── */
+.series-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    padding: 0.6rem 0.85rem;
+    border-radius: 10px;
+    border: 1px solid transparent;
+}
+.series-header--gold {
+    border-color: #d4af37;
+    background: color-mix(in srgb, #d4af37 6%, transparent);
+    box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.15);
+}
+.series-header--silver {
+    border-color: #c0c0c0;
+    background: color-mix(in srgb, #c0c0c0 8%, transparent);
+    box-shadow: 0 0 0 1px rgba(192, 192, 192, 0.15);
+}
+
+.series-rating-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.series-stars {
+    display: inline-flex;
+    gap: 2px;
+    line-height: 1;
+}
+.series-star {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    color: var(--bs-border-color);
+    font-size: 0.95rem;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: color 0.1s, background-color 0.1s;
+}
+.series-star:hover { background: var(--bs-tertiary-bg); }
+.series-star.filled { color: #ffc107; }
+
+.series-fav-btn,
+.series-tier-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border-radius: 6px;
+    background: transparent;
+    border: 1px solid var(--bs-border-color);
+    color: var(--bs-secondary-color);
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: border-color 0.1s, color 0.1s, background-color 0.1s;
+}
+.series-fav-btn:hover,
+.series-tier-btn:hover { background: var(--bs-tertiary-bg); }
+
+.series-fav-btn.is-on {
+    color: #e3526d;
+    border-color: #e3526d;
+    background: color-mix(in srgb, #e3526d 10%, transparent);
+}
+.series-tier-btn--silver.is-on {
+    color: #6b7280;
+    border-color: #c0c0c0;
+    background: color-mix(in srgb, #c0c0c0 18%, transparent);
+}
+.series-tier-btn--gold.is-on {
+    color: #5a4400;
+    border-color: #d4af37;
+    background: color-mix(in srgb, #d4af37 22%, transparent);
+}
+
+/* Tier borders on series-list cards (mirrors book-card.all-time-fav /
+   second-fav so the gold/silver visual is consistent across both views). */
+.series-card.series-card--gold {
+    border: 2px solid #d4af37 !important;
+    box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.25),
+                0 4px 14px rgba(212, 175, 55, 0.18) !important;
+}
+.series-card.series-card--silver {
+    border: 2px solid #c0c0c0 !important;
+    box-shadow: 0 0 0 1px rgba(192, 192, 192, 0.3),
+                0 4px 14px rgba(192, 192, 192, 0.2) !important;
+}
+
 /* Book detail */
 .book-detail {
     max-width: 900px;

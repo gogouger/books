@@ -354,6 +354,9 @@ export function renderSeriesCard(s: any): string {
             : '';
     const monitoredClass = s.monitored === 0 ? ' series-card-hidden' : '';
     const ongoingClass = s.series_complete === 0 ? ' series-card-ongoing' : '';
+    const tierClass =
+        s.is_all_time_fav === 1 ? ' series-card--gold'
+        : s.is_second_fav === 1 ? ' series-card--silver' : '';
     const ongoingBadge = s.series_complete === 0
         ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem">Ongoing</span>'
         : '';
@@ -385,7 +388,7 @@ export function renderSeriesCard(s: any): string {
 
     return `
         <div class="col-6 col-sm-6 col-md-4 col-lg-3">
-            <div class="card series-card${completionClass}${monitoredClass}${ongoingClass} h-100" data-series-id="${s.series_link_id}">
+            <div class="card series-card${completionClass}${monitoredClass}${ongoingClass}${tierClass} h-100" data-series-id="${s.series_link_id}">
                 ${coverHtml}
                 <div class="card-body">
                     <h6 class="card-title mb-1">${escapeHtml(s.series)}${ongoingBadge}</h6>
