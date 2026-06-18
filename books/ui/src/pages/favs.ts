@@ -2,6 +2,7 @@ import { api } from '../api';
 import { getLibraryUsername } from '../context';
 import { bookCardHtml } from '../components/book-card';
 import { attachGridClickHandlers } from '../components/book-grid';
+import { renderSeriesCard, attachSeriesGridHandlers } from './series-list';
 import { setAuthorFilter } from './library';
 import { navigateHome } from '../router';
 
@@ -25,10 +26,12 @@ export async function renderFavs(): Promise<void> {
     `;
 
     try {
-        // Two queries, merged. The API doesn't OR these natively.
-        const [favRes, fiveStarRes] = await Promise.all([
+        // Three queries, merged: hearted books, 5-star books, and the
+        // full series list (so we can filter for hearted/tiered series).
+        const [favRes, fiveStarRes, seriesRes] = await Promise.all([
             api.getBooks(username, { is_favorite: true, limit: 1000, sort: 'title', order: 'asc' }),
             api.getBooks(username, { min_rating: 5, max_rating: 5, limit: 1000, sort: 'title', order: 'asc' }),
+            api.getSeries(username, true),
         ]);
 
         const seen = new Set<number>();
@@ -39,6 +42,25 @@ export async function renderFavs(): Promise<void> {
             all.push(b);
         }
 
+        // Series the user has hearted or tiered (gold/silver) get their
+        // own row at the top of /favs. Sort: gold → silver → hearted →
+        // title (matches the in-bucket book ordering below).
+        const allSeries: any[] = seriesRes?.series || [];
+        const favSeries = allSeries.filter((s: any) =>
+            s.is_all_time_fav === 1
+            || s.is_second_fav === 1
+            || s.is_favorite === 1,
+        );
+        const seriesTier = (s: any) =>
+            s.is_all_time_fav === 1 ? 0
+            : s.is_second_fav === 1 ? 1
+            : 2;
+        favSeries.sort((a: any, b: any) => {
+            const t = seriesTier(a) - seriesTier(b);
+            if (t !== 0) return t;
+            return (a.series || '').localeCompare(b.series || '');
+        });
+
         const heading = `
             <div class="d-flex align-items-baseline justify-content-between flex-wrap mb-3">
                 <h2 class="mb-0">My Favs</h2>
@@ -48,9 +70,18 @@ export async function renderFavs(): Promise<void> {
             </div>
         `;
 
-        if (!all.length) {
+        if (!all.length && !favSeries.length) {
             app.innerHTML = heading + emptyState();
             return;
+        }
+
+        // Build the favorite-series row (rendered above the book buckets).
+        let seriesRow = '';
+        if (favSeries.length) {
+            seriesRow += `<h3 class="favs-category-heading">Favorite Series<span class="text-muted small ms-2">${favSeries.length}</span></h3>`;
+            seriesRow += '<div class="row g-3 mb-4">';
+            for (const s of favSeries) seriesRow += renderSeriesCard(s);
+            seriesRow += '</div>';
         }
 
         // Sort within each bucket: all-time favs first, then 5-star, then
@@ -74,7 +105,7 @@ export async function renderFavs(): Promise<void> {
         }
         for (const cat of CATEGORY_ORDER) buckets[cat].sort(sortFn);
 
-        let html = heading;
+        let html = heading + seriesRow;
         for (const cat of CATEGORY_ORDER) {
             const items = buckets[cat];
             if (!items.length) continue;
@@ -94,6 +125,8 @@ export async function renderFavs(): Promise<void> {
             setAuthorFilter(author);
             navigateHome();
         });
+        // Wire series-card + author-link clicks for the series row.
+        if (favSeries.length) attachSeriesGridHandlers(app);
     } catch (err: any) {
         app.innerHTML = `
             <div class="alert alert-danger">
