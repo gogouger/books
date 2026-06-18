@@ -258,6 +258,24 @@ body::before {
 }
 .cover-format-badge .bi { font-size: 0.9rem; }
 
+/* Tier border + format pip on the book-detail cover. Mirrors the .book-card
+   treatment so the same gem/border reads consistently across views. */
+.detail-cover-wrap { position: relative; display: inline-block; }
+.detail-cover-wrap.all-time-fav .cover-large,
+.detail-cover-wrap.all-time-fav .no-cover-large {
+    border: 3px solid #d4af37;
+    box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.3),
+                0 6px 18px rgba(212, 175, 55, 0.22);
+    border-radius: 6px;
+}
+.detail-cover-wrap.second-fav .cover-large,
+.detail-cover-wrap.second-fav .no-cover-large {
+    border: 3px solid #c0c0c0;
+    box-shadow: 0 0 0 1px rgba(192, 192, 192, 0.3),
+                0 6px 18px rgba(192, 192, 192, 0.22);
+    border-radius: 6px;
+}
+
 /* All-time favorites — golden border around the whole card, plus the gem
    marker. The border is what reads at-a-glance; the gem confirms the why. */
 .book-card.all-time-fav {

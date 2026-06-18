@@ -1361,6 +1361,7 @@ def get_books(
     has_series: bool | None = None,
     rated: bool | None = None,
     letter: str | None = None,
+    book_format: str | None = None,
     sort: str = "title",
     order: str = "asc",
     limit: int = 50,
@@ -1412,6 +1413,10 @@ def get_books(
     if is_owned is not None:
         conditions.append("is_owned = ?")
         params.append(1 if is_owned else 0)
+
+    if book_format is not None:
+        conditions.append("book_format = ?")
+        params.append(book_format)
 
     if has_series is not None:
         if has_series:
@@ -1481,6 +1486,7 @@ def count_books(
     has_series: bool | None = None,
     rated: bool | None = None,
     letter: str | None = None,
+    book_format: str | None = None,
 ) -> int:
     conditions = [
         "user_id = ?", "series_ignored = 0",
@@ -1528,6 +1534,10 @@ def count_books(
     if is_owned is not None:
         conditions.append("is_owned = ?")
         params.append(1 if is_owned else 0)
+
+    if book_format is not None:
+        conditions.append("book_format = ?")
+        params.append(book_format)
 
     if has_series is not None:
         if has_series:
@@ -3740,3 +3750,25 @@ def update_book_sync(
     changed = cursor.rowcount > 0
     conn.close()
     return changed
+
+
+def prune_empty_series_links() -> int:
+    """Drop series_link rows that no user owns any book in.
+
+    user_series + series_entries are cleaned up by the FK cascade; this
+    just removes the parent series_link row. Run after the series sync
+    so wrongly-linked books that the user has since unlinked don't
+    leave a phantom series rendering on the home page.
+    """
+    conn = get_db()
+    cur = conn.execute(
+        "DELETE FROM series_link"
+        " WHERE id NOT IN ("
+        "    SELECT DISTINCT series_link_id FROM books"
+        "    WHERE series_link_id IS NOT NULL AND is_owned = 1"
+        " )"
+    )
+    pruned = cur.rowcount
+    conn.commit()
+    conn.close()
+    return pruned

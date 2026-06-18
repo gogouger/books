@@ -4,6 +4,7 @@ import { getLibraryUsername } from '../context';
 import { navigate, navigateHome } from '../router';
 import { setAuthorFilter, updateCachedBook, invalidateLibraryCache } from './library';
 import { invalidateSeriesCache } from './series-list';
+import { formatBadgeHtml, allTimeFavBadgeHtml } from '../components/book-card';
 import {
     ratingStarsHtml,
     attachRatingHandler,
@@ -122,10 +123,24 @@ function buildKeywordSearch(title: string, authors: string): string {
 function renderBook(app: HTMLElement, book: any, username: string): void {
     const isOwner: boolean = book.is_owner;
 
-    const coverInner = book.cover_filename
+    // Tier border (same gold/silver treatment as the card grid) + format
+    // pip in the top-right corner — single source of truth in book-card.ts.
+    const tierClass = book.is_all_time_fav ? ' all-time-fav'
+        : book.is_second_fav ? ' second-fav' : '';
+    const fmtBadge = formatBadgeHtml(book.book_format);
+    const goldGemBadge = allTimeFavBadgeHtml(book);
+
+    const coverImg = book.cover_filename
         ? `<img src="${api.coverUrl(book.user_id, book.cover_filename, book.cover_updated_at)}"
                alt="${escapeHtml(book.title)}" class="cover-large" id="cover-image">`
         : `<div class="no-cover-large" id="cover-image"><i class="bi bi-book"></i></div>`;
+    const coverInner = `
+        <div class="detail-cover-wrap${tierClass}">
+            ${coverImg}
+            ${fmtBadge}
+            ${goldGemBadge}
+        </div>
+    `;
     const coverHtml = isOwner
         ? `<div class="cover-edit-wrap" id="cover-edit-wrap">
                ${coverInner}

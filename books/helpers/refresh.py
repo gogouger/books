@@ -210,6 +210,18 @@ async def auto_refresh_loop() -> None:
                 changed, unchanged, errors, elapsed,
             )
 
+            # Drop orphan series_link rows that no user owns any book
+            # in. Cleanup after the refresh in case the user manually
+            # unlinked or migrated books to standalone.
+            try:
+                pruned = db.prune_empty_series_links()
+                if pruned:
+                    log.info(
+                        "Pruned %d empty series_link rows", pruned,
+                    )
+            except Exception:
+                log.exception("Empty-series prune failed")
+
         except Exception:
             log.exception(
                 "Auto-refresh cycle error"

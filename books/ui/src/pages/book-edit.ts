@@ -125,6 +125,15 @@ function renderForm(
                 </div>
 
                 <div class="mb-3">
+                    <label class="form-label">Tier</label>
+                    <div class="d-flex gap-2" id="tier-buttons">
+                        <button type="button" class="btn btn-sm flex-fill ${!book.is_all_time_fav && !book.is_second_fav ? 'btn-secondary' : 'btn-outline-secondary'}" data-tier="none">None</button>
+                        <button type="button" class="btn btn-sm flex-fill ${book.is_second_fav ? 'btn-secondary' : 'btn-outline-secondary'}" data-tier="second" style="${book.is_second_fav ? 'background:#c0c0c0;border-color:#c0c0c0;color:#000' : 'border-color:#c0c0c0;color:#888'}">Silver (2nd fav)</button>
+                        <button type="button" class="btn btn-sm flex-fill ${book.is_all_time_fav ? 'btn-warning' : 'btn-outline-secondary'}" data-tier="all" style="${book.is_all_time_fav ? 'background:#d4af37;border-color:#d4af37;color:#000' : 'border-color:#d4af37;color:#888'}">Gold (all-time fav)</button>
+                    </div>
+                </div>
+
+                <div class="mb-3">
                     <label class="form-label">Read Status</label>
                     <div class="d-flex gap-2" id="status-buttons">
                         <button type="button" class="btn btn-sm flex-fill ${book.reading_status === 'unread' ? 'btn-secondary' : 'btn-outline-secondary'}" data-status="unread">Unread</button>
@@ -207,6 +216,36 @@ function renderForm(
     let currentRating = book.rating;
     let currentFavorite = !!book.is_favorite;
     let currentStatus = book.reading_status;
+    let currentTier: 'none' | 'second' | 'all' =
+        book.is_all_time_fav ? 'all'
+        : book.is_second_fav ? 'second' : 'none';
+
+    const tierButtons = document.getElementById('tier-buttons')!;
+    tierButtons.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => {
+            currentTier = (btn as HTMLButtonElement).dataset.tier as any;
+            tierButtons.querySelectorAll('button').forEach(b => {
+                const t = (b as HTMLButtonElement).dataset.tier;
+                const active = t === currentTier;
+                if (t === 'none') {
+                    b.className = 'btn btn-sm flex-fill ' + (active ? 'btn-secondary' : 'btn-outline-secondary');
+                    (b as HTMLButtonElement).removeAttribute('style');
+                } else if (t === 'second') {
+                    b.className = 'btn btn-sm flex-fill ' + (active ? 'btn-secondary' : 'btn-outline-secondary');
+                    (b as HTMLButtonElement).style.cssText = active
+                        ? 'background:#c0c0c0;border-color:#c0c0c0;color:#000'
+                        : 'border-color:#c0c0c0;color:#888';
+                } else {
+                    b.className = 'btn btn-sm flex-fill ' + (active ? 'btn-warning' : 'btn-outline-secondary');
+                    (b as HTMLButtonElement).style.cssText = active
+                        ? 'background:#d4af37;border-color:#d4af37;color:#000'
+                        : 'border-color:#d4af37;color:#888';
+                }
+            });
+            // Tier ⊆ favorite. Selecting silver/gold implies hearting too.
+            if (currentTier !== 'none') currentFavorite = true;
+        });
+    });
 
     attachRatingHandler(
         document.getElementById('rating-container')!,
@@ -262,6 +301,8 @@ function renderForm(
             description,
             rating: currentRating,
             is_favorite: currentFavorite,
+            is_all_time_fav: currentTier === 'all',
+            is_second_fav: currentTier === 'second',
             reading_status: currentStatus,
             manual_category: manualCategory,
         };

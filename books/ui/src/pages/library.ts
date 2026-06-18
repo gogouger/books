@@ -297,6 +297,8 @@ async function loadMoreBooks(): Promise<void> {
             // but tells the series-grouped code path below to skip ghosts.
         } else if (f === 'favorites') {
             params.is_favorite = true;
+        } else if (f.startsWith('fmt_')) {
+            params.book_format = f.slice('fmt_'.length);
         } else if (f.endsWith('star')) {
             const stars = parseInt(f);
             params.min_rating = stars;
@@ -315,6 +317,7 @@ async function loadMoreBooks(): Promise<void> {
                 currentState.filter === 'reading' ||
                 currentState.filter === 'favorites' ||
                 currentState.filter === 'no_ghosts' ||
+                currentState.filter.startsWith('fmt_') ||
                 currentState.filter.endsWith('star')
             );
             if (!filterHidesGhosts) params.include_ghosts = true;
