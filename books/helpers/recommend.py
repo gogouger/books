@@ -70,6 +70,9 @@ _BROAD_GENRES = frozenset({
     "Magic",  # too generic — every fantasy book is "magic"
     "Action & Adventure",
     "General", "Sci-fi",
+    # Non-English variants leak through Hardcover's tags; treat as
+    # broad rather than try to translate them.
+    "Adulte", "Roman", "Fantastico", "Bambini",
 })
 
 
