@@ -739,6 +739,75 @@ body::before {
                 0 4px 14px rgba(192, 192, 192, 0.2) !important;
 }
 
+/* Compact rate/heart/tier controls inline on each series-list card.
+   Buttons stop click propagation so pressing one doesn't navigate. */
+.series-card-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--bs-border-color);
+    flex-wrap: wrap;
+}
+.series-card-stars {
+    display: inline-flex;
+    gap: 1px;
+    line-height: 1;
+}
+.series-card-star {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    color: var(--bs-border-color);
+    font-size: 0.7rem;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: color 0.1s, background-color 0.1s;
+}
+.series-card-star:hover { background: var(--bs-tertiary-bg); }
+.series-card-star.filled { color: #ffc107; }
+
+.series-card-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border-radius: 4px;
+    background: transparent;
+    border: 1px solid var(--bs-border-color);
+    color: var(--bs-secondary-color);
+    font-size: 0.7rem;
+    cursor: pointer;
+    transition: border-color 0.1s, color 0.1s, background-color 0.1s;
+    margin-left: auto;
+}
+.series-card-btn + .series-card-btn { margin-left: 0; }
+.series-card-btn:hover { background: var(--bs-tertiary-bg); }
+
+.series-card-btn--heart.is-on {
+    color: #e3526d;
+    border-color: #e3526d;
+    background: color-mix(in srgb, #e3526d 10%, transparent);
+}
+.series-card-btn--silver.is-on {
+    color: #6b7280;
+    border-color: #c0c0c0;
+    background: color-mix(in srgb, #c0c0c0 18%, transparent);
+}
+.series-card-btn--gold.is-on {
+    color: #5a4400;
+    border-color: #d4af37;
+    background: color-mix(in srgb, #d4af37 22%, transparent);
+}
+
 /* Book detail */
 .book-detail {
     max-width: 900px;

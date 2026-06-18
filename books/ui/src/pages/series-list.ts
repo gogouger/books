@@ -339,6 +339,60 @@ export function attachSeriesGridHandlers(container: HTMLElement): void {
             }
         });
     });
+
+    // In-card rate/heart/tier buttons — one delegated listener for the
+    // whole grid. Each button carries data-action + data-series-id; we
+    // dispatch the matching PATCH, optimistically re-render the card's
+    // controls, and stop propagation so the click doesn't navigate.
+    container.querySelectorAll<HTMLElement>('.series-card-controls').forEach(group => {
+        group.addEventListener('click', async (e) => {
+            const target = (e.target as HTMLElement).closest<HTMLElement>(
+                '[data-action]'
+            );
+            if (!target) return;
+            e.stopPropagation();
+            e.preventDefault();
+            const seriesId = parseInt(target.dataset.seriesId || '0', 10);
+            if (!seriesId) return;
+            const action = target.dataset.action;
+            const card = target.closest<HTMLElement>('.series-card');
+            let patch: Record<string, any> = {};
+            if (action === 'rate') {
+                const next = parseInt(target.dataset.rate || '0', 10);
+                // Click the current rating to clear it.
+                const stars = group.querySelectorAll<HTMLElement>(
+                    '.series-card-star.filled'
+                );
+                const current = stars.length;
+                patch = { rating: next === current ? null : next };
+            } else if (action === 'heart') {
+                const on = target.classList.contains('is-on');
+                patch = { is_favorite: !on };
+            } else if (action === 'silver') {
+                const on = target.classList.contains('is-on');
+                patch = on
+                    ? { is_second_fav: false }
+                    : { is_second_fav: true, is_all_time_fav: false };
+            } else if (action === 'gold') {
+                const on = target.classList.contains('is-on');
+                patch = on
+                    ? { is_all_time_fav: false }
+                    : { is_all_time_fav: true, is_second_fav: false };
+            }
+            const username = getLibraryUsername();
+            if (!username) return;
+            try {
+                await api.updateSeries(username, seriesId, patch);
+                invalidateSeriesCache();
+                // Optimistically refresh the visible state without a full
+                // re-render: reload the series list cache then re-render
+                // just this card's tier class + control row.
+                renderSeriesList();
+            } catch (err: any) {
+                alert(`Failed: ${err.message}`);
+            }
+        });
+    });
 }
 
 export function renderSeriesCard(s: any): string {
@@ -386,6 +440,12 @@ export function renderSeriesCard(s: any): string {
         ? `<div class="series-cover-wrap"><img src="${api.coverUrl(s.first_book_user_id, s.first_book_cover_filename, s.first_book_cover_updated_at)}" alt="${escapeHtml(s.series)}" class="series-cover-img" loading="lazy"></div>`
         : `<div class="series-cover-wrap"><div class="series-no-cover"><i class="bi bi-book"></i></div></div>`;
 
+    const userRating = s.user_rating ?? 0;
+    const inlineControls = renderInlineSeriesControls(
+        s.series_link_id, userRating, s.is_favorite === 1,
+        s.is_all_time_fav === 1, s.is_second_fav === 1,
+    );
+
     return `
         <div class="col-6 col-sm-6 col-md-4 col-lg-3">
             <div class="card series-card${completionClass}${monitoredClass}${ongoingClass}${tierClass} h-100" data-series-id="${s.series_link_id}">
@@ -401,8 +461,52 @@ export function renderSeriesCard(s: any): string {
                     <div class="text-muted small mt-2">
                         Avg rating: ${avgRating}
                     </div>
+                    ${inlineControls}
                 </div>
             </div>
+        </div>
+    `;
+}
+
+// Compact in-card rate/heart/tier controls. Stops click propagation so
+// pressing a button doesn't navigate into the series. Buttons carry
+// data-action+data-series-id so the central handler in
+// attachSeriesGridHandlers can dispatch one click listener for the whole
+// grid instead of per-card listeners.
+function renderInlineSeriesControls(
+    seriesId: number,
+    rating: number,
+    isFavorite: boolean,
+    isAllTime: boolean,
+    isSecond: boolean,
+): string {
+    const stars: string[] = [];
+    for (let i = 1; i <= 5; i++) {
+        const filled = i <= rating;
+        const cls = filled ? 'series-card-star filled' : 'series-card-star';
+        stars.push(`<button type="button" class="${cls}" data-action="rate" data-rate="${i}" data-series-id="${seriesId}" title="${i} star${i !== 1 ? 's' : ''}"><i class="bi ${filled ? 'bi-star-fill' : 'bi-star'}"></i></button>`);
+    }
+    const heartCls = isFavorite
+        ? 'series-card-btn series-card-btn--heart is-on'
+        : 'series-card-btn series-card-btn--heart';
+    const silverCls = isSecond
+        ? 'series-card-btn series-card-btn--silver is-on'
+        : 'series-card-btn series-card-btn--silver';
+    const goldCls = isAllTime
+        ? 'series-card-btn series-card-btn--gold is-on'
+        : 'series-card-btn series-card-btn--gold';
+    return `
+        <div class="series-card-controls" data-series-id="${seriesId}">
+            <span class="series-card-stars">${stars.join('')}</span>
+            <button type="button" class="${heartCls}" data-action="heart" data-series-id="${seriesId}" title="Like series">
+                <i class="bi ${isFavorite ? 'bi-heart-fill' : 'bi-heart'}"></i>
+            </button>
+            <button type="button" class="${silverCls}" data-action="silver" data-series-id="${seriesId}" title="Silver — 2nd favorite">
+                <i class="bi bi-gem"></i>
+            </button>
+            <button type="button" class="${goldCls}" data-action="gold" data-series-id="${seriesId}" title="Gold — all-time favorite">
+                <i class="bi bi-trophy-fill"></i>
+            </button>
         </div>
     `;
 }
