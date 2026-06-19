@@ -1436,54 +1436,57 @@ body::before {
 [data-bs-theme=dark] .status-not-owned  { color:#d2a76b; border-color:#7a5a32; }
 
 /* --- /recommendations page ------------------------------------------- */
-/* Visual goals: feel like the rest of Athenaeum (cream paper, mono type,
-   sea-green accents), not a tacked-on Bootstrap widget. Cover sits flush
-   at the top of the card like a real book card; the text body has its
-   own padding. Section headers feel like printed table-of-contents
-   entries with a thin accent underline. */
+/* Minimal/editorial: no card chrome, the cover *is* the box. Type carries
+   the rest. Stars + heart + dismiss live inline below a hairline divider
+   so the user can rate / favourite / hide from the card without a modal.
+   Title text-underlines on hover — that's the implicit "add as unread"
+   affordance, like a link in a printed catalogue. */
 
-.rec-section {
-    margin-bottom: 2rem;
+.rec-section { margin-bottom: 2.25rem; }
+
+.rec-section-num {
+    font-size: 0.66rem;
+    letter-spacing: 0.18em;
+    color: var(--muted);
+    text-transform: uppercase;
+    line-height: 1;
 }
 .rec-section-header {
-    margin-bottom: 0.85rem;
-    padding-bottom: 0.45rem;
-    border-bottom: 1px solid var(--line);
-    position: relative;
-}
-/* small accent underline on the title — printer's flourish */
-.rec-section-header::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    bottom: -1px;
-    width: 36px;
-    height: 2px;
-    background: var(--accent);
+    display: flex;
+    align-items: baseline;
+    gap: 0.85rem;
+    margin: 0 0 0.25rem;
 }
 .rec-section-title {
     margin: 0;
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: var(--ink);
+    font-size: 0.82rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    color: var(--ink);
+    white-space: nowrap;
+}
+.rec-section-rule {
+    flex: 1;
+    height: 1px;
+    background: var(--line2);
+    align-self: center;
 }
 .rec-section-subtitle {
-    margin: 0.25rem 0 0;
+    margin: 0 0 0.95rem;
     color: var(--muted);
-    font-size: 0.78rem;
+    font-size: 0.72rem;
     font-style: italic;
 }
 
-/* Horizontal shelf — gentle inset shadow to hint at scrollability */
+/* Horizontal shelf — no card backgrounds, so the row breathes against
+   the page bg. Generous gap so cards read as separate objects. */
 .rec-row {
     display: flex;
-    gap: 0.85rem;
+    gap: 1.25rem;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 0.35rem 0.15rem 0.85rem;
-    scroll-snap-type: x proximity;
+    padding: 0.25rem 0.15rem 0.5rem;
     scrollbar-width: thin;
     scrollbar-color: var(--line2) transparent;
 }
@@ -1494,159 +1497,199 @@ body::before {
 }
 .rec-row::-webkit-scrollbar-track { background: transparent; }
 
-/* Card — edge-to-edge cover, body padded separately. No border; rely on
-   a subtle bottom hairline plus hover lift. Matches .book-card vibe. */
 .rec-card {
-    flex: 0 0 180px;
+    flex: 0 0 168px;
     display: flex;
     flex-direction: column;
-    background: var(--panel-bg);
-    border-radius: 8px;
-    overflow: hidden;
-    scroll-snap-align: start;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-    box-shadow: 0 1px 0 var(--line), 0 1px 3px rgba(0,0,0,0.04);
+    background: transparent;
+    transition: transform 0.18s ease;
+    position: relative;
 }
-.rec-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 8px 25px rgba(0,0,0,0.15);
-}
-.rec-card--added {
-    box-shadow: 0 0 0 2px var(--accent), 0 1px 3px rgba(0,0,0,0.04);
-}
+.rec-card:hover { transform: translateY(-2px); }
 
-/* Cover sits flush at the top of the card. Subtle inner shadow tames
-   any baked-in white border on Hardcover JPEGs so the cover reads as a
-   single object rather than a sticker. */
-.rec-card-cover {
+.rec-cover-frame {
     width: 100%;
     aspect-ratio: 2 / 3;
+    background: var(--muted-bg);
+    position: relative;
+    overflow: hidden;
+}
+.rec-cover-frame::after {
+    /* shelf-shadow hint at the bottom of the cover — anchors it visually
+       without a full border or background card. */
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    box-shadow: inset 0 -8px 12px -8px rgba(0,0,0,0.18);
+}
+.rec-cover {
+    width: 100%;
+    height: 100%;
     object-fit: cover;
     display: block;
-    background: var(--bs-secondary-bg);
-    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.04),
-                inset 0 -1px 0 rgba(0,0,0,0.06);
+    background: var(--muted-bg);
+    cursor: pointer;
 }
-.rec-card-cover--placeholder {
+.rec-cover-placeholder {
+    width: 100%;
+    height: 100%;
+    background: var(--muted-bg);
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--muted);
-    font-size: 2.5rem;
-    background: var(--muted-bg);
+    font-size: 2.4rem;
+    cursor: pointer;
 }
 
-.rec-card-body {
+.rec-body {
+    padding: 0.7rem 0.15rem 0;
     display: flex;
     flex-direction: column;
-    gap: 0.2rem;
-    padding: 0.7rem 0.75rem 0.65rem;
-    flex: 1;
+    gap: 0.18rem;
 }
-.rec-card-title {
-    font-weight: 600;
-    font-size: 0.86rem;
-    line-height: 1.3;
+
+/* Genre/why stamp — tiny accent caps with a hairline tail. */
+.rec-stamp {
+    align-self: flex-start;
+    font-size: 0.6rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 0.2rem;
+    display: inline-flex;
+    align-items: center;
+    line-height: 1;
+}
+.rec-stamp::after {
+    content: "";
+    display: inline-block;
+    width: 14px;
+    height: 1px;
+    background: var(--accent);
+    margin-left: 6px;
+}
+
+.rec-title {
+    font-size: 0.82rem;
+    font-weight: 500;
     color: var(--ink);
-    letter-spacing: -0.01em;
+    line-height: 1.3;
+    letter-spacing: -0.005em;
+    cursor: pointer;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
-.rec-card-author {
-    font-size: 0.74rem;
+.rec-card:hover .rec-title {
+    text-decoration: underline;
+    text-decoration-color: var(--accent);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+}
+
+.rec-author {
+    font-size: 0.68rem;
     color: var(--muted);
+    letter-spacing: 0.04em;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.rec-card-series {
-    font-size: 0.7rem;
+.rec-series {
+    font-size: 0.66rem;
     color: var(--accent);
     font-style: italic;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-
-/* "Don't own yet" tag — matches the .card-status legend aesthetic. */
-.rec-card-tag {
-    align-self: flex-start;
-    font-size: 0.62rem;
-    padding: 1px 6px;
-    margin-top: 0.15rem;
-    border-radius: 10px;
-    border: 1px dashed #c0a37a;
-    color: #8a5a1f;
-    letter-spacing: 0.04em;
+.rec-not-owned {
+    font-size: 0.58rem;
+    color: var(--muted);
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    line-height: 1.45;
+    margin-top: 0.15rem;
 }
-[data-bs-theme=dark] .rec-card-tag {
-    color: #d2a76b;
-    border-color: #7a5a32;
-}
-
-.rec-card-why {
-    font-size: 0.7rem;
+.rec-why {
+    font-size: 0.68rem;
     color: var(--muted);
     font-style: italic;
-    line-height: 1.35;
-    margin-top: 0.4rem;
-    padding-top: 0.45rem;
-    border-top: 1px solid var(--line);
+    line-height: 1.4;
+    margin: 0.5rem 0 0;
     display: -webkit-box;
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
+.rec-why::before { content: "— "; color: var(--line2); }
 
-.rec-card-actions {
+/* Bottom strip: stars + heart + dismiss above a hairline divider. */
+.rec-actions {
     display: flex;
-    gap: 5px;
-    margin-top: auto;
-    padding-top: 0.6rem;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 0.55rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid var(--line);
 }
-.rec-card-actions .btn {
-    flex: 1;
-    font-size: 0.72rem;
-    padding: 0.32rem 0.55rem;
-    border-radius: 4px;
-    line-height: 1.1;
-}
-.rec-card-actions .btn-primary {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
-}
-.rec-card-actions .btn-primary:hover,
-.rec-card-actions .btn-primary:focus {
-    background: var(--accent-2);
-    border-color: var(--accent-2);
-    color: #fff;
-}
-.rec-card-actions .btn-success {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
-}
-/* Dismiss is a quieter icon button — text colour matches body, no fill. */
-.rec-card-actions .btn-outline-secondary {
-    flex: 0 0 auto;
-    padding: 0.32rem 0.55rem;
+.rec-stars { display: flex; gap: 1px; }
+.rec-star {
     background: transparent;
+    border: none;
+    padding: 2px 1px;
+    cursor: pointer;
+    color: var(--line2);
+    font-size: 0.82rem;
+    line-height: 1;
+    transition: color 0.1s ease, transform 0.1s ease;
+}
+.rec-star:hover { transform: scale(1.12); }
+.rec-star.hovered,
+.rec-star.filled { color: #c8893b; }
+[data-bs-theme=dark] .rec-star.hovered,
+[data-bs-theme=dark] .rec-star.filled { color: #e4a23a; }
+
+.rec-right { display: flex; gap: 0; align-items: center; }
+.rec-icon-btn {
+    background: transparent;
+    border: none;
+    padding: 3px 5px;
+    cursor: pointer;
     color: var(--muted);
-    border-color: var(--line2);
+    font-size: 0.82rem;
+    line-height: 1;
+    border-radius: 3px;
+    transition: color 0.12s ease, background 0.12s ease;
 }
-.rec-card-actions .btn-outline-secondary:hover {
-    background: var(--muted-bg);
+.rec-icon-btn:hover {
     color: var(--ink);
-    border-color: var(--line2);
+    background: var(--muted-bg);
 }
+.rec-icon-btn.heart-on { color: #c2454e; }
+.rec-icon-btn.heart-on:hover { color: #a8323a; }
+[data-bs-theme=dark] .rec-icon-btn.heart-on { color: #ec6973; }
+
+.rec-card--added {
+    /* subtle "saved" affordance — slight inset glow on the cover, plus a
+       little bottom mark. No bright border or pill. */
+}
+.rec-card--added .rec-cover-frame::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    box-shadow: inset 0 0 0 2px var(--accent);
+    pointer-events: none;
+    z-index: 1;
+}
+.rec-card--added .rec-cover { cursor: default; }
+.rec-card--added .rec-title { cursor: default; }
+.rec-card--added .rec-card:hover .rec-title,
+.rec-card--added.rec-card:hover .rec-title { text-decoration: none; }
 
 @media (max-width: 600px) {
-    .rec-card { flex-basis: 152px; }
-    .rec-card-title { font-size: 0.8rem; }
-    .rec-card-author { font-size: 0.7rem; }
+    .rec-card { flex-basis: 144px; }
+    .rec-title { font-size: 0.78rem; }
 }

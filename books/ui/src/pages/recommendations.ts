@@ -1,7 +1,12 @@
 import { api } from '../api';
 import { getLibraryUsername } from '../context';
 import { getUser } from '../auth';
+import { navigate } from '../router';
 
+// One unified Rec shape regardless of which row it came from. For
+// `next_in_series` we get book_id (it's in the library); for the
+// Hardcover rows we get hc_book_id. Stars/heart click handlers
+// discriminate on which id is present.
 type Rec = {
     kind: 'next_in_series' | 'loved_author' | 'similar_to';
     book_id?: number;
@@ -12,7 +17,8 @@ type Rec = {
     series_index?: number | null;
     cover_url: string | null;
     is_owned?: boolean;
-    in_library_book_id?: number;
+    rating?: number;
+    is_favorite?: boolean;
     why: string;
 };
 
@@ -22,6 +28,32 @@ type RecsPayload = {
     similar_to_favorites: Rec[];
     generated_at: number;
 };
+
+const ROWS: Array<{
+    key: keyof Omit<RecsPayload, 'generated_at'>;
+    num: string;
+    title: string;
+    sub: string;
+}> = [
+    {
+        key: 'continue',
+        num: '01',
+        title: 'Finish what you started',
+        sub: 'Next in series you’re reading',
+    },
+    {
+        key: 'loved_authors',
+        num: '02',
+        title: 'More from authors you love',
+        sub: 'Other works by your gold, silver, and 5★ authors',
+    },
+    {
+        key: 'similar_to_favorites',
+        num: '03',
+        title: 'Top in your genres',
+        sub: 'Top books in the genres your favourites share',
+    },
+];
 
 export async function renderRecommendations(): Promise<void> {
     const app = document.getElementById('app')!;
@@ -33,7 +65,7 @@ export async function renderRecommendations(): Promise<void> {
             <div class="alert alert-info">
                 <strong>Sign in to see recommendations.</strong>
                 Recommendations are personal — they're built from your
-                gold/silver/5★ books and series.
+                gold, silver, and 5★ books and series.
             </div>
         `;
         return;
@@ -68,81 +100,57 @@ function loadingHtml(msg: string): string {
 }
 
 function render(app: HTMLElement, username: string, data: RecsPayload): void {
-    const totalRecs =
+    const total =
         (data.continue?.length || 0)
         + (data.loved_authors?.length || 0)
         + (data.similar_to_favorites?.length || 0);
 
     const generated = new Date(data.generated_at * 1000);
-    const ageMin = Math.floor(
-        (Date.now() - generated.getTime()) / 60000,
-    );
+    const ageMin = Math.floor((Date.now() - generated.getTime()) / 60000);
     const ageLabel = ageMin < 60
         ? `${ageMin} min ago`
         : `${Math.floor(ageMin / 60)} hr ago`;
 
     const heading = `
-        <div class="d-flex align-items-baseline justify-content-between flex-wrap mb-3">
+        <div class="d-flex align-items-baseline justify-content-between flex-wrap mb-4">
             <h2 class="mb-0">Recommendations</h2>
             <div class="d-flex align-items-baseline gap-3">
-                <span class="text-muted small">
-                    Generated ${ageLabel}
-                </span>
-                <button class="btn btn-sm btn-outline-secondary"
-                        id="recs-refresh-btn">
+                <span class="text-muted small">Generated ${ageLabel}</span>
+                <button class="btn btn-sm btn-outline-secondary" id="recs-refresh-btn">
                     <i class="bi bi-arrow-clockwise"></i> Refresh
                 </button>
             </div>
         </div>
     `;
 
-    if (totalRecs === 0) {
+    if (total === 0) {
         app.innerHTML = heading + emptyState();
         wireRefresh(app, username);
         return;
     }
 
     let html = heading;
-
-    if (data.continue?.length) {
-        html += renderRow(
-            'Finish what you started',
-            'Next in series you’re reading',
-            data.continue,
-            'continue',
-        );
+    for (const row of ROWS) {
+        const items = data[row.key] || [];
+        if (!items.length) continue;
+        html += renderRow(row.num, row.title, row.sub, items);
     }
-    if (data.loved_authors?.length) {
-        html += renderRow(
-            'More from authors you love',
-            'Other works by your gold, silver, and 5★ authors',
-            data.loved_authors,
-            'loved_authors',
-        );
-    }
-    if (data.similar_to_favorites?.length) {
-        html += renderRow(
-            'Because you loved…',
-            'Books that share themes with your top reads',
-            data.similar_to_favorites,
-            'similar_to_favorites',
-        );
-    }
-
     app.innerHTML = html;
     wireCards(app, username);
     wireRefresh(app, username);
 }
 
 function renderRow(
-    title: string, subtitle: string, items: Rec[], rowKey: string,
+    num: string, title: string, sub: string, items: Rec[],
 ): string {
     let html = `
-        <section class="rec-section" data-rec-row="${rowKey}">
+        <section class="rec-section">
             <div class="rec-section-header">
+                <span class="rec-section-num">${num}</span>
                 <h3 class="rec-section-title">${title}</h3>
-                <p class="rec-section-subtitle">${subtitle}</p>
+                <span class="rec-section-rule"></span>
             </div>
+            <p class="rec-section-subtitle">${sub}</p>
             <div class="rec-row">
     `;
     for (const r of items) html += recCardHtml(r);
@@ -154,137 +162,276 @@ function renderRow(
 }
 
 function recCardHtml(rec: Rec): string {
-    const inLibrary = rec.kind === 'next_in_series';
     const hcId = rec.hc_book_id != null ? String(rec.hc_book_id) : '';
     const bookId = rec.book_id != null ? String(rec.book_id) : '';
+    const rating = rec.rating || 0;
+    const fav = rec.is_favorite ? '1' : '0';
+    const inLib = !!bookId;
 
     const cover = rec.cover_url
-        ? `<img src="${rec.cover_url}" alt="${escapeAttr(rec.title)}"
-                class="rec-card-cover"
-                onerror="this.replaceWith(document.createElement('div'))"
+        ? `<img class="rec-cover" src="${rec.cover_url}"
+                alt="${escAttr(rec.title)}"
+                data-role="primary"
+                onerror="this.outerHTML='&lt;div class=&quot;rec-cover-placeholder&quot; data-role=&quot;primary&quot;&gt;&lt;i class=&quot;bi bi-book&quot;&gt;&lt;/i&gt;&lt;/div&gt;'"
                 referrerpolicy="no-referrer">`
-        : `<div class="rec-card-cover rec-card-cover--placeholder">
-               <i class="bi bi-book"></i>
-           </div>`;
+        : `<div class="rec-cover-placeholder" data-role="primary"><i class="bi bi-book"></i></div>`;
 
-    const seriesLine = rec.series
-        ? `<div class="rec-card-series">
-               ${escapeText(rec.series)}${
-                   rec.series_index != null ? ` #${rec.series_index}` : ''
-               }
-           </div>`
+    // Stamp shows series for Row 1, "why" verbatim for HC rows. Sea-green
+    // accent caps; tiny tail-rule from CSS.
+    const stamp = rec.kind === 'next_in_series'
+        ? `<span class="rec-stamp">${escText(rec.series || 'Continue')}</span>`
+        : `<span class="rec-stamp">${escText(stampLabel(rec))}</span>`;
+
+    const seriesLine = rec.series && rec.kind !== 'next_in_series'
+        ? `<div class="rec-series">${escText(rec.series)}${
+              rec.series_index != null ? ` #${rec.series_index}` : ''
+          }</div>`
         : '';
 
-    const ownedBadge = (inLibrary && rec.is_owned === false)
-        ? '<span class="rec-card-tag">Don’t own yet</span>'
+    const notOwnedHint = (inLib && rec.is_owned === false)
+        ? `<div class="rec-not-owned">Don’t own yet</div>`
         : '';
 
-    const primaryAction = inLibrary
-        ? `<a class="btn btn-sm btn-primary"
-              href="#/book/${bookId}">Open</a>`
-        : `<button class="btn btn-sm btn-primary rec-add-btn"
-                   data-hc-id="${hcId}">
-              <i class="bi bi-plus-lg"></i> Add
-           </button>`;
+    const stars = Array.from({ length: 5 }, (_, i) => {
+        const v = i + 1;
+        const cls = v <= rating ? 'rec-star filled' : 'rec-star';
+        return `<button class="${cls}" data-action="rate" data-val="${v}">★</button>`;
+    }).join('');
 
-    const secondaryAction = inLibrary
-        ? ''
-        : `<button class="btn btn-sm btn-outline-secondary rec-dismiss-btn"
-                   data-hc-id="${hcId}"
-                   title="Not interested">
-              <i class="bi bi-x"></i>
-           </button>`;
+    const heartCls = rec.is_favorite ? 'rec-icon-btn heart-on' : 'rec-icon-btn';
+    const heart = `<button class="${heartCls}" data-action="heart" title="Favourite">♥</button>`;
+    const dismiss = `<button class="rec-icon-btn" data-action="dismiss" title="Not interested">✕</button>`;
 
     return `
-        <article class="rec-card" data-hc-id="${hcId}" data-book-id="${bookId}">
-            ${cover}
-            <div class="rec-card-body">
-                <div class="rec-card-title" title="${escapeAttr(rec.title)}">
-                    ${escapeText(rec.title)}
+        <article class="rec-card${inLib && (rating || rec.is_favorite) ? ' rec-card--added' : ''}"
+                 data-hc-id="${hcId}"
+                 data-book-id="${bookId}"
+                 data-rating="${rating}"
+                 data-favorite="${fav}">
+            <div class="rec-cover-frame">${cover}</div>
+            <div class="rec-body">
+                ${stamp}
+                <div class="rec-title" data-role="primary" title="${escAttr(rec.title)}">
+                    ${escText(rec.title)}
                 </div>
-                <div class="rec-card-author">
-                    ${escapeText(rec.authors)}
-                </div>
+                <div class="rec-author">${escText(rec.authors)}</div>
                 ${seriesLine}
-                ${ownedBadge}
-                <div class="rec-card-why">${escapeText(rec.why)}</div>
-                <div class="rec-card-actions">
-                    ${primaryAction}
-                    ${secondaryAction}
+                ${notOwnedHint}
+                <div class="rec-why">${escText(rec.why)}</div>
+                <div class="rec-actions">
+                    <div class="rec-stars" data-rating="${rating}">${stars}</div>
+                    <div class="rec-right">${heart}${dismiss}</div>
                 </div>
             </div>
         </article>
     `;
 }
 
+function stampLabel(rec: Rec): string {
+    // Why looks like "Top Fantasy — you loved ...". Pull the stamp text
+    // out of it; fall back to a generic label.
+    const m = /^(?:By|Top)\s+([^—\-]+?)\s*(?:—|-)\s*/.exec(rec.why || '');
+    if (m) return m[1].trim();
+    return rec.kind === 'loved_author' ? 'Same author' : 'Recommended';
+}
+
 function wireCards(app: HTMLElement, username: string): void {
+    let hoverGroup: HTMLElement | null = null;
+
+    // Star hover preview — light up stars up to the hovered index.
+    app.addEventListener('mouseover', (ev) => {
+        const star = (ev.target as HTMLElement).closest<HTMLElement>('.rec-star');
+        if (!star) return;
+        const group = star.parentElement;
+        if (!group) return;
+        hoverGroup = group;
+        const v = parseInt(star.getAttribute('data-val') || '0', 10);
+        group.querySelectorAll<HTMLElement>('.rec-star').forEach((s, i) => {
+            s.classList.toggle('hovered', i < v);
+        });
+    });
+    app.addEventListener('mouseout', (ev) => {
+        const star = (ev.target as HTMLElement).closest<HTMLElement>('.rec-star');
+        if (!star) return;
+        // When the pointer leaves the group entirely, clear hovered state.
+        setTimeout(() => {
+            if (!hoverGroup) return;
+            if (!hoverGroup.matches(':hover')) {
+                hoverGroup.querySelectorAll<HTMLElement>('.rec-star')
+                    .forEach(s => s.classList.remove('hovered'));
+                hoverGroup = null;
+            }
+        }, 0);
+    });
+
+    // Click delegation — covers primary (cover/title), stars, heart, dismiss.
     app.addEventListener('click', async (ev) => {
         const target = ev.target as HTMLElement;
-        const addBtn = target.closest<HTMLButtonElement>('.rec-add-btn');
-        const dismissBtn = target.closest<HTMLButtonElement>(
-            '.rec-dismiss-btn',
-        );
+        const card = target.closest<HTMLElement>('.rec-card');
+        if (!card) return;
+        const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;
+        const primary = target.closest<HTMLElement>('[data-role="primary"]');
 
-        if (addBtn) {
-            const hcId = Number(addBtn.dataset.hcId);
-            if (!hcId) return;
-            const card = addBtn.closest<HTMLElement>('.rec-card');
-            if (!card) return;
-            addBtn.disabled = true;
-            addBtn.innerHTML =
-                '<span class="spinner-border spinner-border-sm"></span>';
-            try {
-                const res = await api.addRecommendationToLibrary(
-                    username, hcId,
-                );
-                card.classList.add('rec-card--added');
-                addBtn.outerHTML = `
-                    <a class="btn btn-sm btn-success" href="#/book/${res.book_id}">
-                        <i class="bi bi-check2"></i> Added
-                    </a>
-                `;
-                // hide the dismiss button — it's already in the library
-                card.querySelector<HTMLElement>('.rec-dismiss-btn')?.remove();
-            } catch (err: any) {
-                addBtn.disabled = false;
-                addBtn.innerHTML = '<i class="bi bi-plus-lg"></i> Add';
-                alert(`Add failed: ${err.message}`);
-            }
+        // Primary click on cover/title — add or open
+        if (!action && primary) {
+            await handlePrimary(card, username);
             return;
         }
 
-        if (dismissBtn) {
-            const hcId = Number(dismissBtn.dataset.hcId);
-            if (!hcId) return;
-            const card = dismissBtn.closest<HTMLElement>('.rec-card');
-            if (!card) return;
-            dismissBtn.disabled = true;
-            try {
-                await api.dismissRecommendation(username, hcId);
-                card.style.opacity = '0';
-                card.style.transition = 'opacity 200ms';
-                setTimeout(() => card.remove(), 220);
-            } catch (err: any) {
-                dismissBtn.disabled = false;
-                alert(`Dismiss failed: ${err.message}`);
-            }
+        if (action === 'rate') {
+            const v = parseInt(
+                (target.closest<HTMLElement>('[data-val]')?.dataset.val) || '0', 10,
+            );
+            if (!v) return;
+            await handleRate(card, username, v);
+            return;
+        }
+        if (action === 'heart') {
+            await handleHeart(card, username);
+            return;
+        }
+        if (action === 'dismiss') {
+            await handleDismiss(card, username);
             return;
         }
     });
 }
 
+async function handlePrimary(card: HTMLElement, username: string): Promise<void> {
+    const bookId = parseInt(card.dataset.bookId || '0', 10);
+    if (bookId) {
+        navigate(`#/book/${bookId}`);
+        return;
+    }
+    const hcId = parseInt(card.dataset.hcId || '0', 10);
+    if (!hcId) return;
+    flashWorking(card);
+    try {
+        const res = await api.addRecommendationToLibrary(username, hcId, {
+            reading_status: 'unread',
+            is_owned: 0,
+        });
+        applyAddedState(card, res);
+    } catch (err: any) {
+        flashError(card, `Add failed: ${err.message}`);
+    }
+}
+
+async function handleRate(
+    card: HTMLElement, username: string, value: number,
+): Promise<void> {
+    const bookId = parseInt(card.dataset.bookId || '0', 10);
+    flashWorking(card);
+    try {
+        if (bookId) {
+            // Already in library — just update the rating.
+            await api.updateBook(username, bookId, {
+                rating: value,
+                reading_status: 'read',
+            });
+        } else {
+            const hcId = parseInt(card.dataset.hcId || '0', 10);
+            if (!hcId) return;
+            const res = await api.addRecommendationToLibrary(username, hcId, {
+                rating: value,
+                reading_status: 'read',
+                is_owned: 0,
+            });
+            card.dataset.bookId = String(res.book_id);
+        }
+        setRatingUI(card, value);
+        card.classList.add('rec-card--added');
+    } catch (err: any) {
+        flashError(card, `Rate failed: ${err.message}`);
+    }
+}
+
+async function handleHeart(card: HTMLElement, username: string): Promise<void> {
+    const bookId = parseInt(card.dataset.bookId || '0', 10);
+    const current = card.dataset.favorite === '1';
+    const next = !current;
+    flashWorking(card);
+    try {
+        if (bookId) {
+            await api.updateBook(username, bookId, { is_favorite: next });
+        } else {
+            const hcId = parseInt(card.dataset.hcId || '0', 10);
+            if (!hcId) return;
+            const res = await api.addRecommendationToLibrary(username, hcId, {
+                is_favorite: true,
+                reading_status: 'unread',
+                is_owned: 0,
+            });
+            card.dataset.bookId = String(res.book_id);
+        }
+        setFavUI(card, next);
+        card.classList.add('rec-card--added');
+    } catch (err: any) {
+        flashError(card, `Heart failed: ${err.message}`);
+    }
+}
+
+async function handleDismiss(card: HTMLElement, username: string): Promise<void> {
+    const hcId = parseInt(card.dataset.hcId || '0', 10);
+    if (!hcId) {
+        // Row 1 (in-library) — dismiss just hides the card locally.
+        fadeOutAndRemove(card);
+        return;
+    }
+    try {
+        await api.dismissRecommendation(username, hcId);
+        fadeOutAndRemove(card);
+    } catch (err: any) {
+        flashError(card, `Dismiss failed: ${err.message}`);
+    }
+}
+
+function setRatingUI(card: HTMLElement, value: number): void {
+    card.dataset.rating = String(value);
+    const stars = card.querySelectorAll<HTMLElement>('.rec-star');
+    stars.forEach((s, i) => {
+        s.classList.toggle('filled', i < value);
+        s.classList.remove('hovered');
+    });
+}
+
+function setFavUI(card: HTMLElement, on: boolean): void {
+    card.dataset.favorite = on ? '1' : '0';
+    const btn = card.querySelector<HTMLElement>('[data-action="heart"]');
+    if (btn) btn.classList.toggle('heart-on', on);
+}
+
+function applyAddedState(card: HTMLElement, res: any): void {
+    if (res?.book_id) card.dataset.bookId = String(res.book_id);
+    if (res?.rating != null) setRatingUI(card, res.rating);
+    if (res?.is_favorite) setFavUI(card, true);
+    card.classList.add('rec-card--added');
+}
+
+function flashWorking(card: HTMLElement): void {
+    card.style.opacity = '0.65';
+    setTimeout(() => { card.style.opacity = ''; }, 450);
+}
+
+function flashError(card: HTMLElement, msg: string): void {
+    card.style.opacity = '';
+    alert(msg);
+}
+
+function fadeOutAndRemove(card: HTMLElement): void {
+    card.style.transition = 'opacity 180ms';
+    card.style.opacity = '0';
+    setTimeout(() => card.remove(), 200);
+}
+
 function wireRefresh(app: HTMLElement, username: string): void {
-    const btn = document.getElementById(
-        'recs-refresh-btn',
-    ) as HTMLButtonElement | null;
+    const btn = document.getElementById('recs-refresh-btn') as HTMLButtonElement | null;
     if (!btn) return;
     btn.addEventListener('click', async () => {
         btn.disabled = true;
         app.innerHTML = loadingHtml('Recomputing recommendations…');
         try {
-            const data = await api.refreshRecommendations(
-                username,
-            ) as RecsPayload;
+            const data = await api.refreshRecommendations(username) as RecsPayload;
             render(app, username, data);
         } catch (err: any) {
             app.innerHTML = `
@@ -309,13 +456,12 @@ function emptyState(): string {
     `;
 }
 
-function escapeText(s: string): string {
+function escText(s: string): string {
     return (s || '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
 }
-
-function escapeAttr(s: string): string {
-    return escapeText(s).replace(/"/g, '&quot;');
+function escAttr(s: string): string {
+    return escText(s).replace(/"/g, '&quot;');
 }

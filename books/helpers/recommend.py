@@ -194,7 +194,9 @@ def next_in_series(user_id: int) -> list[dict]:
             b_next.series_index,
             b_next.cover_filename,
             b_next.cover_updated_at,
-            b_next.is_owned
+            b_next.is_owned,
+            b_next.rating,
+            b_next.is_favorite
         FROM user_series us
         JOIN series_link sl ON sl.id = us.series_link_id
         JOIN (
@@ -252,6 +254,8 @@ def next_in_series(user_id: int) -> list[dict]:
             "series_index": r["series_index"],
             "cover_url": cover_url,
             "is_owned": bool(r["is_owned"]),
+            "rating": int(r["rating"]) if r["rating"] else 0,
+            "is_favorite": bool(r["is_favorite"]),
             "why": f"Next in {r['series_name']}",
             "in_library_book_id": r["book_id"],
         })

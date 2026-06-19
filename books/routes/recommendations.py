@@ -77,6 +77,12 @@ def dismiss_rec(payload: DismissPayload, auth: require_owner) -> dict:
 
 class AddFromHCPayload(BaseModel):
     hc_book_id: int
+    # Optional initial state — a star-click adds as read+rated, a
+    # heart-click adds as favourite, a title-click adds as plain unread.
+    rating: int | None = None
+    is_favorite: bool | None = None
+    is_owned: int | None = None
+    reading_status: str | None = None
 
 
 @router.post("/add-from-hc")
@@ -127,8 +133,32 @@ async def add_from_hardcover(
     existing_id = unowned_id or (owned_match["id"] if owned_match else None)
 
     now = datetime.now(timezone.utc).isoformat()
+    # Caller-provided initial state — defaults match a plain "add as
+    # want-to-read" if none are set.
+    init_status = payload.reading_status or "unread"
+    init_owned = 0 if payload.is_owned is None else int(payload.is_owned)
+    init_rating = payload.rating
+    init_fav = 1 if payload.is_favorite else 0
+    init_finished = now if init_status == "read" else None
+
     if existing_id:
         book_id = existing_id
+        # Apply caller-provided state to the existing row too — a
+        # heart-click on a Row 2 candidate that's already an unowned
+        # ghost should still favourite it.
+        upgrade: dict = {}
+        if payload.rating is not None:
+            upgrade["rating"] = init_rating
+        if payload.is_favorite is not None:
+            upgrade["is_favorite"] = init_fav
+        if payload.reading_status is not None:
+            upgrade["reading_status"] = init_status
+            if init_status == "read":
+                upgrade["date_finished"] = now
+        if payload.is_owned is not None:
+            upgrade["is_owned"] = init_owned
+        if upgrade:
+            db.update_book(book_id, user_id, upgrade)
     else:
         book_id = db.insert_book(
             user_id=user_id,
@@ -145,14 +175,16 @@ async def add_from_hardcover(
             goodreads_id=None,
             tags=None,
             date_added=now,
-            date_finished=None,
-            rating=None,
-            reading_status="unread",
+            date_finished=init_finished,
+            rating=init_rating,
+            reading_status=init_status,
             series_link_id=series_link_id,
             published_date=detail.get("published_date") or None,
-            is_owned=0,
+            is_owned=init_owned,
             book_format="physical",
         )
+        if init_fav:
+            db.update_book(book_id, user_id, {"is_favorite": 1})
 
     # Cover download — best effort. Don't fail the add if it 404s.
     cover_url = detail.get("cover_url")
@@ -181,7 +213,14 @@ async def add_from_hardcover(
             log.exception("cover download failed for %s", cover_url)
 
     _cache.pop(user_id, None)
-    return {"book_id": book_id, "title": title}
+    return {
+        "book_id": book_id,
+        "title": title,
+        "rating": init_rating,
+        "is_favorite": bool(init_fav),
+        "reading_status": init_status,
+        "is_owned": init_owned,
+    }
 
 
 @router.post("/refresh")

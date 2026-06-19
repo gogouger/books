@@ -301,10 +301,19 @@ export const api = {
 
     async addRecommendationToLibrary(
         username: string, hcBookId: number,
+        opts?: {
+            rating?: number;
+            is_favorite?: boolean;
+            is_owned?: number;
+            reading_status?: string;
+        },
     ): Promise<any> {
         return apiFetch(`/${username}/recommendations/add-from-hc`, {
             method: 'POST',
-            body: JSON.stringify({ hc_book_id: hcBookId }),
+            body: JSON.stringify({
+                hc_book_id: hcBookId,
+                ...(opts || {}),
+            }),
         });
     },
 
