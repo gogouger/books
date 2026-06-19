@@ -19,6 +19,7 @@ from pydantic import BaseModel, field_validator
 
 from ..helpers import db, hardcover, metrics as metrics_helper
 from ..helpers import auto_price as auto_price_helper
+from ..helpers import auto_tags as auto_tags_helper
 from ..helpers.auth import (
     library_owner,
     optional_user,
@@ -121,6 +122,12 @@ async def post_auto_price(auth: require_owner) -> dict:
     Google Books for ISBN-listed books, falls back to format/category
     defaults for the rest. Returns a summary the page renders inline."""
     return await auto_price_helper.auto_price_user(auth["user_id"])
+
+
+@router.post("/metrics/auto-tags")
+async def post_auto_tags(auth: require_owner) -> dict:
+    """Bulk-fill sub-genre tags from Hardcover for every untagged book."""
+    return await auto_tags_helper.auto_tags_user(auth["user_id"])
 
 
 # --- Read-only routes (anonymous or authenticated) ---

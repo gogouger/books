@@ -11,16 +11,22 @@ type Metrics = {
     value: {
         total: number; owned: number; avg: number;
         priced_count: number; unpriced_count: number;
+        untagged_count: number;
     };
     tiers: {
         gold: number; silver: number; bronze: number;
         five_star: number; hearted: number;
     };
     formats: Array<{ format: string; count: number; value: number }>;
+    read_vs_listened: {
+        read: { count: number; value: number };
+        listened: { count: number; value: number };
+        percent_listened: number;
+    };
     categories: Array<{
         name: string; count: number; read: number;
         value: number;
-        subgenres: Array<{ name: string; count: number }>;
+        subgenres: Array<{ name: string; count: number; read: number }>;
     }>;
     top_by_value: Array<{
         id: number; title: string; authors: string;
@@ -69,15 +75,21 @@ function render(app: HTMLElement, m: Metrics): void {
 
     const autoFillBtn = m.value.unpriced_count > 0
         ? `<button class="btn btn-sm btn-outline-secondary" id="metrics-autofill-btn">
-              <i class="bi bi-magic"></i> Auto-fill ${m.value.unpriced_count} unpriced
+              <i class="bi bi-magic"></i> Auto-fill ${m.value.unpriced_count} prices
+           </button>`
+        : '';
+    const autoTagsBtn = m.value.untagged_count > 0
+        ? `<button class="btn btn-sm btn-outline-secondary" id="metrics-autotags-btn">
+              <i class="bi bi-tags"></i> Auto-fill ${m.value.untagged_count} tags
            </button>`
         : '';
 
     app.innerHTML = `
         <div class="d-flex align-items-baseline justify-content-between flex-wrap mb-4 gap-2">
             <h2 class="mb-0">Library metrics</h2>
-            <div class="d-flex align-items-baseline gap-3">
+            <div class="d-flex align-items-baseline gap-3 flex-wrap">
                 <span class="text-muted small">${m.counts.total} books in catalog</span>
+                ${autoTagsBtn}
                 ${autoFillBtn}
             </div>
         </div>
@@ -95,7 +107,15 @@ function render(app: HTMLElement, m: Metrics): void {
             </div>
         `)}
 
-        ${section('02', 'Tiers', 'Your hand-picked podium', `
+        ${section('02', 'Read vs listened', 'Page-eyes vs ear-canals on what you finished', `
+            <div class="metric-tiles">
+                ${tile(m.read_vs_listened.read.count.toLocaleString(), 'Read', `physical + ebook · ${usd(m.read_vs_listened.read.value)} spent`)}
+                ${tile(m.read_vs_listened.listened.count.toLocaleString(), 'Listened', `audiobooks · ${usd(m.read_vs_listened.listened.value)} spent`)}
+                ${tile(`${m.read_vs_listened.percent_listened}%`, 'Listened share', `of everything finished`)}
+            </div>
+        `)}
+
+        ${section('03', 'Tiers', 'Your hand-picked podium', `
             <div class="metric-row">
                 ${chip('Gold', m.tiers.gold, 'gold')}
                 ${chip('Silver', m.tiers.silver, 'silver')}
@@ -105,7 +125,7 @@ function render(app: HTMLElement, m: Metrics): void {
             </div>
         `)}
 
-        ${section('03', 'Formats', 'Counts + spend per format', `
+        ${section('04', 'Formats', 'Counts + spend per format', `
             <table class="metrics-table">
                 <thead><tr><th>Format</th><th class="num">Count</th><th class="num">Spend</th></tr></thead>
                 <tbody>
@@ -140,6 +160,49 @@ function render(app: HTMLElement, m: Metrics): void {
     `;
 
     wireAutofill(app);
+    wireAutoTags(app);
+}
+
+function wireAutoTags(app: HTMLElement): void {
+    const btn = document.getElementById(
+        'metrics-autotags-btn',
+    ) as HTMLButtonElement | null;
+    if (!btn) return;
+    const status = document.getElementById('metrics-autofill-status')!;
+    btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.innerHTML =
+            '<span class="spinner-border spinner-border-sm"></span> Tagging…';
+        status.innerHTML = `
+            <div class="alert alert-info py-2 small">
+                Pulling sub-genre tags from Hardcover — this takes 4–6 minutes for a large library.
+            </div>
+        `;
+        try {
+            const username = (
+                window.location.pathname.split('/').filter(Boolean)[0] || ''
+            );
+            const res = await (await import('../api')).api
+                .autoTagsLibrary(username);
+            status.innerHTML = `
+                <div class="alert alert-success py-2 small">
+                    Tagged <strong>${res.filled}</strong> books.
+                    ${res.no_hc_match ? `${res.no_hc_match} not found on Hardcover.` : ''}
+                    ${res.no_genres ? `${res.no_genres} had no genres listed.` : ''}
+                    ${res.skipped ? `${res.skipped} skipped.` : ''}
+                </div>
+            `;
+            renderMetrics();
+        } catch (err: any) {
+            status.innerHTML = `
+                <div class="alert alert-danger py-2 small">
+                    Auto-tag failed: ${escText(err.message || String(err))}
+                </div>
+            `;
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-tags"></i> Try again';
+        }
+    });
 }
 
 function wireAutofill(app: HTMLElement): void {
@@ -200,21 +263,28 @@ function renderCategoryBlock(
     const pct = c.count ? Math.round(100 * c.read / c.count) : 0;
     const subgenresHtml = c.subgenres.length
         ? `<div class="metric-row metric-row--wrap">
-              ${c.subgenres.map(s => `
-                <span class="metric-subgenre">
-                    ${escText(s.name)} <span class="metric-subgenre-n">${s.count}</span>
-                </span>
-              `).join('')}
+              ${c.subgenres.map(s => {
+                  const subPct = s.count
+                      ? Math.round(100 * s.read / s.count)
+                      : 0;
+                  return `
+                    <span class="metric-subgenre">
+                        ${escText(s.name)}
+                        <span class="metric-subgenre-n">${s.count}</span>
+                        <span class="metric-subgenre-pct">${subPct}% read</span>
+                    </span>
+                  `;
+              }).join('')}
            </div>`
-        : `<p class="text-muted small mb-0">No sub-genre tags yet.</p>`;
+        : `<p class="text-muted small mb-0">No sub-genre tags yet. Hit the <em>Auto-fill tags</em> button up top.</p>`;
 
     return section(num, c.name, `${c.count} books · ${pct}% read · ${usd(c.value)} spent`, subgenresHtml);
 }
 
 function catNumber(name: string): number {
-    if (name === 'Religious') return 4;
-    if (name === 'Fiction') return 5;
-    return 6;
+    if (name === 'Religious') return 5;
+    if (name === 'Fiction') return 6;
+    return 7;
 }
 
 function section(num: string, title: string, subtitle: string, body: string): string {

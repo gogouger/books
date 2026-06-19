@@ -139,22 +139,27 @@ def compute_metrics(user_id: int) -> dict:
 
     # --- Category + sub-genre breakdown ----------------------------------
     # manual_category buckets: Religious / Fiction / Other. Within each,
-    # break out sub-genres by tags (normalised). Each book contributes to
-    # every tag it has.
+    # break out sub-genres by tags (normalised). Track per-subgenre read
+    # counts so the page can show 'Epic Fantasy 18 (12 read · 67%)'.
     cat_buckets: dict[str, dict] = {}
     for b in books:
         cat = b.get("manual_category") or "Other"
         bucket = cat_buckets.setdefault(cat, {
             "count": 0, "read": 0, "value": 0.0,
-            "subgenres": Counter(),
+            "sub_count": Counter(),
+            "sub_read": Counter(),
         })
         bucket["count"] += 1
-        if b["reading_status"] == "read":
+        is_read = b["reading_status"] == "read"
+        if is_read:
             bucket["read"] += 1
         if b.get("price") is not None:
             bucket["value"] += float(b["price"])
         for tag in _parse_tags(b.get("tags")):
-            bucket["subgenres"][_normalise_tag(tag)] += 1
+            norm = _normalise_tag(tag)
+            bucket["sub_count"][norm] += 1
+            if is_read:
+                bucket["sub_read"][norm] += 1
 
     categories = []
     for cat in ("Religious", "Fiction", "Other"):
@@ -162,8 +167,12 @@ def compute_metrics(user_id: int) -> dict:
             continue
         bucket = cat_buckets[cat]
         sub = [
-            {"name": name, "count": cnt}
-            for name, cnt in bucket["subgenres"].most_common(20)
+            {
+                "name": name,
+                "count": cnt,
+                "read": bucket["sub_read"][name],
+            }
+            for name, cnt in bucket["sub_count"].most_common(24)
         ]
         categories.append({
             "name": cat,
@@ -172,6 +181,44 @@ def compute_metrics(user_id: int) -> dict:
             "value": round(bucket["value"], 2),
             "subgenres": sub,
         })
+
+    # --- Read vs listened ------------------------------------------------
+    # 'Listened' = read + audiobook. 'Read' = read + non-audiobook (physical
+    # or ebook). Books with also_physical=1 don't double-count here — we
+    # treat their primary format as the surface for this stat.
+    read_books = 0
+    read_value = 0.0
+    listened_books = 0
+    listened_value = 0.0
+    for b in books:
+        if b["reading_status"] != "read":
+            continue
+        fmt = b.get("book_format") or "ebook"
+        if fmt == "audiobook":
+            listened_books += 1
+            if b.get("price") is not None:
+                listened_value += float(b["price"])
+        else:
+            read_books += 1
+            if b.get("price") is not None:
+                read_value += float(b["price"])
+
+    total_finished = read_books + listened_books
+    pct_listened = round(
+        100 * listened_books / total_finished, 1,
+    ) if total_finished else 0
+
+    read_vs_listened = {
+        "read": {
+            "count": read_books,
+            "value": round(read_value, 2),
+        },
+        "listened": {
+            "count": listened_books,
+            "value": round(listened_value, 2),
+        },
+        "percent_listened": pct_listened,
+    }
 
     # --- Top 10 by price -------------------------------------------------
     top_by_value = sorted(
@@ -188,6 +235,12 @@ def compute_metrics(user_id: int) -> dict:
         for b in top_by_value
     ]
 
+    # --- Untagged count --------------------------------------------------
+    untagged_count = sum(
+        1 for b in books
+        if not _parse_tags(b.get("tags"))
+    )
+
     return {
         "counts": {
             "total": total,
@@ -203,9 +256,11 @@ def compute_metrics(user_id: int) -> dict:
             "avg": avg_price,
             "priced_count": priced_count,
             "unpriced_count": total - priced_count,
+            "untagged_count": untagged_count,
         },
         "tiers": tiers,
         "formats": formats,
+        "read_vs_listened": read_vs_listened,
         "categories": categories,
         "top_by_value": top_by_value,
     }

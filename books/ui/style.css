@@ -1986,6 +1986,12 @@ body::before {
     font-weight: 500;
     font-size: 0.78rem;
 }
+.metric-subgenre-pct {
+    color: var(--muted);
+    font-size: 0.66rem;
+    font-style: italic;
+    margin-left: 0.15rem;
+}
 
 .metrics-table {
     width: 100%;
