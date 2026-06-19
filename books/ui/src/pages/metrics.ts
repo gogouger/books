@@ -163,12 +163,19 @@ function wireAutofill(app: HTMLElement): void {
             );
             const res = await (await import('../api')).api
                 .autoPriceLibrary(username);
+
+            const lines: string[] = [];
+            lines.push(`Filled <strong>${res.filled}</strong> books — ${res.from_google} from Google Books, ${res.from_default} from format defaults.`);
+            if (res.rate_limited) {
+                lines.push(res.has_api_key
+                    ? `Google rate-limited us mid-batch — daily quota likely hit. Try again tomorrow for the remaining ${res.from_default}.`
+                    : `Google rate-limited us (anonymous quota). Set <code>GOOGLE_BOOKS_API_KEY</code> in the VPS .env and re-run for real prices on the ${res.from_default} that fell back to defaults.`);
+            } else if (!res.has_api_key && res.from_default > res.from_google) {
+                lines.push(`Most fills came from format defaults. Set <code>GOOGLE_BOOKS_API_KEY</code> in the .env for accurate publisher prices.`);
+            }
             status.innerHTML = `
-                <div class="alert alert-success py-2 small">
-                    Filled ${res.filled} books —
-                    ${res.from_google} from Google Books,
-                    ${res.from_default} from format defaults.
-                    ${res.skipped ? `${res.skipped} skipped.` : ''}
+                <div class="alert alert-${res.rate_limited ? 'warning' : 'success'} py-2 small">
+                    ${lines.join('<br>')}
                 </div>
             `;
             // Refetch + re-render metrics
