@@ -290,6 +290,12 @@ export const api = {
         return apiFetch(`/${username}/metrics`);
     },
 
+    async autoPriceLibrary(username: string): Promise<any> {
+        return apiFetch(`/${username}/metrics/auto-price`, {
+            method: 'POST',
+        });
+    },
+
     async getRecommendations(username: string): Promise<any> {
         return apiFetch(`/${username}/recommendations`);
     },

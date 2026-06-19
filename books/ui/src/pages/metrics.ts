@@ -67,11 +67,21 @@ function render(app: HTMLElement, m: Metrics): void {
             minimumFractionDigits: 2, maximumFractionDigits: 2,
         })}`;
 
+    const autoFillBtn = m.value.unpriced_count > 0
+        ? `<button class="btn btn-sm btn-outline-secondary" id="metrics-autofill-btn">
+              <i class="bi bi-magic"></i> Auto-fill ${m.value.unpriced_count} unpriced
+           </button>`
+        : '';
+
     app.innerHTML = `
-        <div class="d-flex align-items-baseline justify-content-between flex-wrap mb-4">
+        <div class="d-flex align-items-baseline justify-content-between flex-wrap mb-4 gap-2">
             <h2 class="mb-0">Library metrics</h2>
-            <span class="text-muted small">${m.counts.total} books in catalog</span>
+            <div class="d-flex align-items-baseline gap-3">
+                <span class="text-muted small">${m.counts.total} books in catalog</span>
+                ${autoFillBtn}
+            </div>
         </div>
+        <div id="metrics-autofill-status"></div>
 
         ${section('01', 'Overview', '', `
             <div class="metric-tiles">
@@ -112,7 +122,7 @@ function render(app: HTMLElement, m: Metrics): void {
 
         ${m.categories.map(c => renderCategoryBlock(c, usd)).join('')}
 
-        ${m.top_by_value.length ? section('99', 'Top by price', 'The most expensive books in the library', `
+        ${section('99', 'Top by price', 'The most expensive books in the library', m.top_by_value.length ? `
             <table class="metrics-table">
                 <thead><tr><th>Title</th><th>Author</th><th>Format</th><th class="num">Price</th></tr></thead>
                 <tbody>
@@ -126,8 +136,53 @@ function render(app: HTMLElement, m: Metrics): void {
                     `).join('')}
                 </tbody>
             </table>
-        `) : ''}
+        ` : `<p class="text-muted small mb-0">Add prices to see this list.</p>`)}
     `;
+
+    wireAutofill(app);
+}
+
+function wireAutofill(app: HTMLElement): void {
+    const btn = document.getElementById(
+        'metrics-autofill-btn',
+    ) as HTMLButtonElement | null;
+    if (!btn) return;
+    const status = document.getElementById('metrics-autofill-status')!;
+    btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.innerHTML =
+            '<span class="spinner-border spinner-border-sm"></span> Filling…';
+        status.innerHTML = `
+            <div class="alert alert-info py-2 small">
+                Looking up prices for unpriced books — this can take 30s for a large library.
+            </div>
+        `;
+        try {
+            const username = (
+                window.location.pathname.split('/').filter(Boolean)[0] || ''
+            );
+            const res = await (await import('../api')).api
+                .autoPriceLibrary(username);
+            status.innerHTML = `
+                <div class="alert alert-success py-2 small">
+                    Filled ${res.filled} books —
+                    ${res.from_google} from Google Books,
+                    ${res.from_default} from format defaults.
+                    ${res.skipped ? `${res.skipped} skipped.` : ''}
+                </div>
+            `;
+            // Refetch + re-render metrics
+            renderMetrics();
+        } catch (err: any) {
+            status.innerHTML = `
+                <div class="alert alert-danger py-2 small">
+                    Auto-fill failed: ${escText(err.message || String(err))}
+                </div>
+            `;
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-magic"></i> Try again';
+        }
+    });
 }
 
 function renderCategoryBlock(

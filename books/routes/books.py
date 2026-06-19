@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, field_validator
 
 from ..helpers import db, hardcover, metrics as metrics_helper
+from ..helpers import auto_price as auto_price_helper
 from ..helpers.auth import (
     library_owner,
     optional_user,
@@ -112,6 +113,14 @@ def get_metrics(auth: require_owner) -> dict:
     """Owner-only library metrics: counts, value, tier + category + sub-genre
     breakdowns, top-N by price."""
     return metrics_helper.compute_metrics(auth["user_id"])
+
+
+@router.post("/metrics/auto-price")
+async def post_auto_price(auth: require_owner) -> dict:
+    """Bulk-fill prices for every unpriced book. Best-effort: tries
+    Google Books for ISBN-listed books, falls back to format/category
+    defaults for the rest. Returns a summary the page renders inline."""
+    return await auto_price_helper.auto_price_user(auth["user_id"])
 
 
 # --- Read-only routes (anonymous or authenticated) ---
