@@ -84,12 +84,15 @@ export async function renderFavs(): Promise<void> {
             seriesRow += '</div>';
         }
 
-        // Sort within each bucket: all-time favs first, then 5-star, then
-        // hearted-only. Tiebreak by title.
+        // Sort within each bucket: gold (all-time fav) first, then silver
+        // (second fav), then 5-star, then hearted-only. Tiebreak by title.
+        // Silver was missing from the hierarchy — books like
+        // 'God the Son Incarnate' (silver) fell after 5-star.
         const tier = (b: any) =>
             b.is_all_time_fav === 1 ? 0
-            : b.rating === 5 ? 1
-            : 2;
+            : b.is_second_fav === 1 ? 1
+            : b.rating === 5 ? 2
+            : 3;
         const sortFn = (a: any, b: any) => {
             const t = tier(a) - tier(b);
             if (t !== 0) return t;
