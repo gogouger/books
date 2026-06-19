@@ -396,10 +396,6 @@ export function attachSeriesGridHandlers(container: HTMLElement): void {
 }
 
 export function renderSeriesCard(s: any): string {
-    const avgRating = s.avg_rating
-        ? Math.round(s.avg_rating).toString()
-        : '-';
-
     const notOwnedCount = s.not_owned_count || 0;
     const completionClass = s.read_count === s.total_books
         ? ' series-card-complete'
@@ -409,14 +405,8 @@ export function renderSeriesCard(s: any): string {
     const monitoredClass = s.monitored === 0 ? ' series-card-hidden' : '';
     const ongoingClass = s.series_complete === 0 ? ' series-card-ongoing' : '';
     const tierClass =
-        s.is_all_time_fav === 1 ? ' series-card--gold'
-        : s.is_second_fav === 1 ? ' series-card--silver' : '';
-    const ongoingBadge = s.series_complete === 0
-        ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem">Ongoing</span>'
-        : '';
-    const notOwnedLabel = notOwnedCount > 0
-        ? ` <span class="text-danger">${notOwnedCount} not owned</span>`
-        : '';
+        s.is_all_time_fav === 1 ? ' series-card--gold all-time-fav'
+        : s.is_second_fav === 1 ? ' series-card--silver second-fav' : '';
 
     const segmentsHtml = renderSegmentedBar(
         s.status_seq || '', s.owned_seq || '',
@@ -424,21 +414,36 @@ export function renderSeriesCard(s: any): string {
     );
 
     const authorHtml = s.authors
-        ? `<div class="text-muted small">${s.authors.split(',').map((a: string) => {
+        ? `<div class="card-author">${s.authors.split(',').map((a: string) => {
             const trimmed = a.trim();
             return `<span class="series-author-link" data-authors="${escapeHtml(trimmed)}">${escapeHtml(trimmed)}</span>`;
         }).join(', ')}</div>`
         : '';
 
-    // Cover comes from the series's first book (lowest series_index,
-    // tiebreaker by id ascending — computed server-side). When that
-    // book has no cover, fall back to a small no-cover placeholder
-    // matching the .no-cover-large pattern used on book detail.
-    const coverHtml = (
+    const stampText = s.read_count === s.total_books
+        ? 'Complete'
+        : s.read_count > 0 ? `${s.read_count}/${s.total_books} read`
+        : `${s.total_books} book${s.total_books !== 1 ? 's' : ''}`;
+    const stampHtml = `<span class="card-stamp">${escapeHtml(stampText)}${s.series_complete === 0 ? ' · ongoing' : ''}</span>`;
+
+    const coverInner = (
         s.first_book_cover_filename && s.first_book_user_id != null
     )
-        ? `<div class="series-cover-wrap"><img src="${api.coverUrl(s.first_book_user_id, s.first_book_cover_filename, s.first_book_cover_updated_at)}" alt="${escapeHtml(s.series)}" class="series-cover-img" loading="lazy"></div>`
-        : `<div class="series-cover-wrap"><div class="series-no-cover"><i class="bi bi-book"></i></div></div>`;
+        ? `<img src="${api.coverUrl(s.first_book_user_id, s.first_book_cover_filename, s.first_book_cover_updated_at)}"
+                alt="${escapeHtml(s.series)}" loading="lazy"
+                onerror="this.outerHTML='&lt;div class=&quot;no-cover&quot;&gt;&lt;i class=&quot;bi bi-collection&quot;&gt;&lt;/i&gt;&lt;/div&gt;'">`
+        : `<div class="no-cover"><i class="bi bi-collection"></i></div>`;
+
+    const tierCrown =
+        s.is_all_time_fav === 1
+            ? '<span class="cover-tier-crown tier-gold" title="All-time favorite"><i class="bi bi-crown-fill"></i></span>'
+        : s.is_second_fav === 1
+            ? '<span class="cover-tier-crown tier-silver" title="Second favorite"><i class="bi bi-crown"></i></span>'
+        : '';
+
+    const notOwnedLine = notOwnedCount > 0
+        ? `<div class="series-notowned-line">${notOwnedCount} not owned</div>`
+        : '';
 
     const userRating = s.user_rating ?? 0;
     const inlineControls = renderInlineSeriesControls(
@@ -448,19 +453,18 @@ export function renderSeriesCard(s: any): string {
 
     return `
         <div class="col-6 col-sm-6 col-md-4 col-lg-3">
-            <div class="card series-card${completionClass}${monitoredClass}${ongoingClass}${tierClass} h-100" data-series-id="${s.series_link_id}">
-                ${coverHtml}
+            <div class="series-card${completionClass}${monitoredClass}${ongoingClass}${tierClass}"
+                 data-series-id="${s.series_link_id}">
+                <div class="cover-container">
+                    ${coverInner}
+                    ${tierCrown}
+                </div>
                 <div class="card-body">
-                    <h6 class="card-title mb-1">${escapeHtml(s.series)}${ongoingBadge}</h6>
+                    ${stampHtml}
+                    <h6 class="card-title">${escapeHtml(s.series)}</h6>
                     ${authorHtml}
-                    <div class="d-flex justify-content-between text-muted small mb-2">
-                        <span>${s.total_books} book${s.total_books !== 1 ? 's' : ''}</span>
-                        <span>${s.read_count}/${s.total_books} read${notOwnedLabel}</span>
-                    </div>
                     ${segmentsHtml}
-                    <div class="text-muted small mt-2">
-                        Avg rating: ${avgRating}
-                    </div>
+                    ${notOwnedLine}
                     ${inlineControls}
                 </div>
             </div>

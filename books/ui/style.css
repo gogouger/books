@@ -65,133 +65,199 @@ body::before {
 }
 [data-bs-theme="dark"] body::before { display: none; }
 
-/* Book cards */
+/* Book cards — minimalist treatment matching /recommendations.
+   No card chrome (background/border). Cover is the box; type carries
+   the rest. Side gutter is gone: status sits as a thin horizontal accent
+   bar at the bottom of the cover, stars + heart live in an inline meta
+   row below the body. Click the card body / title / cover → open detail;
+   click a star or heart → mutate in place. */
 .book-card {
-    cursor: pointer;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    cursor: default;
+    transition: transform 0.18s ease;
     border: none;
-    border-radius: 8px;
-    overflow: hidden;
-    height: 100%;
+    background: transparent;
     display: flex;
     flex-direction: column;
+    position: relative;
+    padding: 0;
 }
-
-.book-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-}
+.book-card:hover { transform: translateY(-2px); }
 
 .book-card .cover-container {
     width: 100%;
     aspect-ratio: var(--cover-ratio);
     overflow: hidden;
-    background-color: var(--bs-secondary-bg);
+    background-color: var(--muted-bg);
     position: relative;
+    cursor: pointer;
 }
-
+.book-card .cover-container::after {
+    /* shelf-shadow inset at the bottom edge of the cover so the cover
+       reads as sitting on a surface without needing a full card. */
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    box-shadow: inset 0 -8px 12px -8px rgba(0,0,0,0.18);
+}
 .book-card .cover-container img {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    display: block;
 }
-
 .book-card .no-cover {
     display: flex;
     align-items: center;
     justify-content: center;
     height: 100%;
-    color: var(--bs-secondary-color);
-    font-size: 3rem;
+    color: var(--muted);
+    font-size: 2.6rem;
 }
 
-/* Card progress bar (reading status) */
+/* Thin status bar pinned to the bottom of the cover — replaces the side
+   gutter. Read = sea-green, reading = warm amber, unread = neutral hairline. */
+.cover-status {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 3px;
+    z-index: 1;
+}
+.cover-status.status-read    { background: #2f8a6a; }
+.cover-status.status-reading { background: #c8893b; }
+.cover-status.status-unread  { background: rgba(0,0,0,0.12); }
+[data-bs-theme=dark] .cover-status.status-unread { background: rgba(255,255,255,0.08); }
+
+/* Reading-progress bar — sits just above the status accent. */
 .card-progress {
     position: absolute;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    height: 5px;
-    background: rgba(0, 0, 0, 0.3);
+    left: 0; right: 0;
+    bottom: 3px;
+    height: 3px;
+    background: rgba(0, 0, 0, 0.15);
+    z-index: 1;
 }
-
 .card-progress-fill {
     height: 100%;
-    background: var(--bs-primary);
-}
-
-/* Card info: gutter + text side by side */
-.card-info {
-    display: flex;
-    flex-direction: row;
-    flex: 1;
-}
-
-.card-gutter {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    width: 24px;
-    min-width: 24px;
-    padding: 4px 0;
-}
-
-.gutter-read { background-color: #198754; }
-.gutter-reading { background-color: #c8893b; }
-.gutter-unread { background-color: var(--bs-border-color); }
-
-.gutter-fav {
-    color: #dc3545;
-    font-size: 0.9rem;
-    line-height: 1;
-}
-
-.gutter-stars {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    margin-top: auto;
-}
-
-.gutter-star {
-    color: var(--bs-border-color);
-    font-size: 0.9rem;
-    line-height: 1.1;
-}
-
-.gutter-star.filled {
-    color: #ffc107;
+    background: var(--accent);
 }
 
 .book-card .card-body {
-    padding: 0.75rem;
+    padding: 0.55rem 0.15rem 0;
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+/* Stamp: tiny sea-green caps with a hairline tail-rule. Used for series
+   name (when not in a series-grouped view) or category. */
+.card-stamp {
+    align-self: flex-start;
+    font-size: 0.6rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 0.2rem;
+    display: inline-flex;
+    align-items: center;
+    line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+.card-stamp::after {
+    content: "";
+    display: inline-block;
+    width: 14px;
+    height: 1px;
+    background: var(--accent);
+    margin-left: 6px;
+    flex: 0 0 14px;
 }
 
 .book-card .card-title {
-    font-size: 0.9rem;
-    font-weight: 600;
-    margin-bottom: 0.25rem;
+    font-size: 0.86rem;
+    font-weight: 500;
+    margin: 0;
+    line-height: 1.3;
+    color: var(--ink);
+    letter-spacing: -0.005em;
+    cursor: pointer;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
+.book-card:hover .card-title {
+    text-decoration: underline;
+    text-decoration-color: var(--accent);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+}
 
 .book-card .card-author {
-    font-size: 0.8rem;
-    color: var(--bs-secondary-color);
-    margin-bottom: 0.25rem;
+    font-size: 0.7rem;
+    color: var(--muted);
+    margin: 0;
+    letter-spacing: 0.03em;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
+/* Inline meta row: stars + heart above a hairline divider. */
+.card-meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 0.5rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid var(--line);
+}
+.card-stars { display: flex; gap: 1px; }
+.card-star {
+    background: transparent;
+    border: none;
+    padding: 2px 1px;
+    cursor: pointer;
+    color: var(--line2);
+    font-size: 0.82rem;
+    line-height: 1;
+    transition: color 0.1s ease, transform 0.1s ease;
+}
+.card-star:hover { transform: scale(1.12); }
+.card-star.hovered,
+.card-star.filled { color: #c8893b; }
+[data-bs-theme=dark] .card-star.hovered,
+[data-bs-theme=dark] .card-star.filled { color: #e4a23a; }
+
+.card-heart {
+    background: transparent;
+    border: none;
+    padding: 3px 5px;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 0.85rem;
+    line-height: 1;
+    border-radius: 3px;
+    transition: color 0.12s ease, background 0.12s ease;
+}
+.card-heart:hover { color: var(--ink); background: var(--muted-bg); }
+.card-heart.on { color: #c2454e; }
+.card-heart.on:hover { color: #a8323a; }
+[data-bs-theme=dark] .card-heart.on { color: #ec6973; }
+
 .book-card .card-series {
-    font-size: 0.75rem;
-    color: var(--bs-link-color);
-    margin-bottom: 0.25rem;
+    font-size: 0.66rem;
+    color: var(--accent);
+    font-style: italic;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Clickable author/series links on cards */
@@ -235,9 +301,14 @@ body::before {
     text-decoration: underline;
 }
 
-/* Not owned books — the red "Don't own" pill carries the signal, no dimming. */
-.book-card.not-owned .card-body {
-    background-color: var(--muted-bg);
+/* Not owned books — the small "Don't own" stamp under the title carries
+   the signal. No background dimming in the minimalist layout. */
+.book-card.not-owned .card-not-owned {
+    font-size: 0.58rem;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-top: 0.1rem;
 }
 
 /* Format pip on the cover corner. Ebook is default — no badge. Audiobook gets
@@ -274,63 +345,69 @@ body::before {
     right: auto;
 }
 
-/* Tier border + format pip on the book-detail cover. Mirrors the .book-card
-   treatment so the same gem/border reads consistently across views. */
-.detail-cover-wrap { position: relative; display: inline-block; }
-.detail-cover-wrap.all-time-fav .cover-large,
-.detail-cover-wrap.all-time-fav .no-cover-large {
-    border: 3px solid #d4af37;
-    box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.3),
-                0 6px 18px rgba(212, 175, 55, 0.22);
-    border-radius: 6px;
+/* Gold / silver tier — clean crown badge on the cover top-left, plus a
+   subtle 2px inset on the cover frame (no full-card border, no glow). */
+.book-card.all-time-fav .cover-container::before,
+.book-card.second-fav .cover-container::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
 }
-.detail-cover-wrap.second-fav .cover-large,
-.detail-cover-wrap.second-fav .no-cover-large {
-    border: 3px solid #c0c0c0;
-    box-shadow: 0 0 0 1px rgba(192, 192, 192, 0.3),
-                0 6px 18px rgba(192, 192, 192, 0.22);
-    border-radius: 6px;
+.book-card.all-time-fav .cover-container::before {
+    box-shadow: inset 0 0 0 2px #d4af37;
 }
-
-/* All-time favorites — golden border around the whole card, plus the gem
-   marker. The border is what reads at-a-glance; the gem confirms the why. */
-.book-card.all-time-fav {
-    border: 2px solid #d4af37;
-    box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.25),
-                0 4px 14px rgba(212, 175, 55, 0.18);
-}
-.book-card.all-time-fav:hover {
-    box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.5),
-                0 8px 25px rgba(212, 175, 55, 0.28);
+.book-card.second-fav .cover-container::before {
+    box-shadow: inset 0 0 0 2px #b8b8b8;
 }
 
-/* Second-favorite tier — silver border, one notch below gold. */
-.book-card.second-fav {
-    border: 2px solid #b8b8b8;
-    box-shadow: 0 0 0 1px rgba(184, 184, 184, 0.25),
-                0 4px 14px rgba(184, 184, 184, 0.18);
-}
-.book-card.second-fav:hover {
-    box-shadow: 0 0 0 1px rgba(184, 184, 184, 0.5),
-                0 8px 25px rgba(184, 184, 184, 0.28);
-}
-
-/* All-time favorite — gem in the top-left corner. Sapphire-ish blue. */
-.cover-fav-badge {
+/* Crown badge — tiny gilded chip in the cover's top-left corner. */
+.cover-tier-crown {
     position: absolute;
     top: 6px;
     left: 6px;
-    background: rgba(0, 0, 0, 0.65);
-    color: #6cb6ff;
-    padding: 3px 6px;
-    border-radius: 4px;
-    font-size: 0.85rem;
-    line-height: 1;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
     display: inline-flex;
     align-items: center;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    justify-content: center;
+    font-size: 0.78rem;
+    line-height: 1;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+    z-index: 2;
 }
-.cover-fav-badge .bi { font-size: 0.95rem; }
+.cover-tier-crown.tier-gold {
+    background: linear-gradient(135deg, #f0d066 0%, #b8902a 100%);
+    color: #2a1f02;
+}
+.cover-tier-crown.tier-silver {
+    background: linear-gradient(135deg, #e8e8e8 0%, #9c9c9c 100%);
+    color: #2a2a2a;
+}
+.cover-tier-crown .bi { font-size: 0.78rem; }
+
+/* Tier-aware stamp tone in the body — title nudges into gold/silver
+   accent so the tier reads even when the cover is scrolled off-screen. */
+.book-card.all-time-fav .card-stamp { color: #b8902a; }
+.book-card.all-time-fav .card-stamp::after { background: #b8902a; }
+.book-card.second-fav  .card-stamp { color: #7a7a7a; }
+.book-card.second-fav  .card-stamp::after { background: #7a7a7a; }
+
+/* Detail page mirrors the same approach: crown is positioned by markup,
+   and the cover gets the same 2px inset rather than the previous border+glow. */
+.detail-cover-wrap { position: relative; display: inline-block; }
+.detail-cover-wrap.all-time-fav .cover-large,
+.detail-cover-wrap.all-time-fav .no-cover-large {
+    box-shadow: inset 0 0 0 3px #d4af37;
+    border-radius: 4px;
+}
+.detail-cover-wrap.second-fav .cover-large,
+.detail-cover-wrap.second-fav .no-cover-large {
+    box-shadow: inset 0 0 0 3px #b8b8b8;
+    border-radius: 4px;
+}
 
 .favs-category-heading {
     color: var(--bs-primary);
@@ -347,38 +424,33 @@ body::before {
 }
 
 /* Ghost cards — series entries the user doesn't have a book for.
-   Hollow look with a dashed border and a "Not in library" pill. */
-.book-card.ghost-card {
-    border: 1px dashed var(--bs-border-color);
-    background: transparent;
-    opacity: 0.85;
-}
-.book-card.ghost-card:hover { opacity: 1; }
+   In the minimalist layout: cover is a dashed-border outline (no fill),
+   small stamp underneath says "Don't own". Title stays in muted ink. */
 .book-card.ghost-card .cover-container.ghost-cover {
     background-color: transparent;
-    position: relative;
+    border: 1px dashed var(--line2);
+    border-radius: 2px;
 }
+.book-card.ghost-card .cover-container.ghost-cover::after { box-shadow: none; }
 .book-card.ghost-card .no-cover {
-    color: var(--bs-secondary-color);
-    font-size: 2.5rem;
-    opacity: 0.6;
+    color: var(--muted);
+    font-size: 2.4rem;
+    opacity: 0.7;
 }
 .book-card.ghost-card .ghost-badge {
     position: absolute;
     bottom: 6px;
     left: 50%;
     transform: translateX(-50%);
-    font-size: 0.65rem;
+    font-size: 0.6rem;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
-    background: var(--muted-bg);
-    border: 1px solid var(--bs-border-color);
-    color: var(--bs-secondary-color);
-    padding: 2px 6px;
-    border-radius: 4px;
+    letter-spacing: 0.1em;
+    color: var(--muted);
     white-space: nowrap;
 }
-.book-card.ghost-card .card-title { color: var(--bs-secondary-color); }
+.book-card.ghost-card .card-title { color: var(--muted); font-weight: 400; }
+.book-card.ghost-card .card-stamp { color: var(--muted); }
+.book-card.ghost-card .card-stamp::after { background: var(--muted); }
 
 /* Rating stars */
 .rating-stars {
@@ -740,15 +812,16 @@ body::before {
 }
 
 /* Compact rate/heart/tier controls inline on each series-list card.
-   Buttons stop click propagation so pressing one doesn't navigate. */
+   Matches the minimalist book-card meta-row: hairline divider, no button
+   chrome, accent colour only when the toggle is on. */
 .series-card-controls {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-top: 8px;
-    padding-top: 6px;
-    border-top: 1px solid var(--bs-border-color);
-    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 0.5rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid var(--line);
+    flex-wrap: nowrap;
 }
 .series-card-stars {
     display: inline-flex;
@@ -756,57 +829,38 @@ body::before {
     line-height: 1;
 }
 .series-card-star {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    height: 18px;
-    padding: 0;
     background: transparent;
     border: 0;
-    color: var(--bs-border-color);
-    font-size: 0.7rem;
+    padding: 2px 1px;
+    color: var(--line2);
+    font-size: 0.82rem;
     cursor: pointer;
-    border-radius: 3px;
-    transition: color 0.1s, background-color 0.1s;
+    transition: color 0.1s ease, transform 0.1s ease;
 }
-.series-card-star:hover { background: var(--bs-tertiary-bg); }
-.series-card-star.filled { color: #ffc107; }
+.series-card-star:hover { transform: scale(1.12); }
+.series-card-star.filled,
+.series-card-star.hovered { color: #c8893b; }
+[data-bs-theme=dark] .series-card-star.filled,
+[data-bs-theme=dark] .series-card-star.hovered { color: #e4a23a; }
 
 .series-card-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    border-radius: 4px;
     background: transparent;
-    border: 1px solid var(--bs-border-color);
-    color: var(--bs-secondary-color);
-    font-size: 0.7rem;
+    border: 0;
+    padding: 3px 4px;
+    color: var(--muted);
+    font-size: 0.82rem;
     cursor: pointer;
-    transition: border-color 0.1s, color 0.1s, background-color 0.1s;
+    border-radius: 3px;
+    transition: color 0.12s ease, background 0.12s ease;
     margin-left: auto;
 }
 .series-card-btn + .series-card-btn { margin-left: 0; }
-.series-card-btn:hover { background: var(--bs-tertiary-bg); }
+.series-card-btn:hover { background: var(--muted-bg); color: var(--ink); }
 
-.series-card-btn--heart.is-on {
-    color: #e3526d;
-    border-color: #e3526d;
-    background: color-mix(in srgb, #e3526d 10%, transparent);
-}
-.series-card-btn--silver.is-on {
-    color: #6b7280;
-    border-color: #c0c0c0;
-    background: color-mix(in srgb, #c0c0c0 18%, transparent);
-}
-.series-card-btn--gold.is-on {
-    color: #5a4400;
-    border-color: #d4af37;
-    background: color-mix(in srgb, #d4af37 22%, transparent);
-}
+.series-card-btn--heart.is-on { color: #c2454e; }
+.series-card-btn--silver.is-on { color: #7a7a7a; }
+.series-card-btn--gold.is-on { color: #b8902a; }
+[data-bs-theme=dark] .series-card-btn--heart.is-on { color: #ec6973; }
 
 /* Book detail */
 .book-detail {
@@ -971,27 +1025,110 @@ body::before {
     margin-top: 0.25rem;
 }
 
-/* Series cards */
+/* Series cards — same minimalist treatment as book-card. The shared
+   .cover-container + .card-body class names mean a single style sheet
+   covers both card families. */
 .series-card {
-    transition: transform 0.15s ease;
+    transition: transform 0.18s ease;
     cursor: pointer;
-    overflow: hidden;
+    background: transparent;
+    border: none;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 0;
+    position: relative;
+}
+.series-card:hover { transform: translateY(-2px); }
+.series-card:hover .card-title {
+    text-decoration: underline;
+    text-decoration-color: var(--accent);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
 }
 
-.series-card:hover {
-    transform: translateY(-2px);
-}
-
-/* Cover banner on series cards — first book in the series.
-   Use aspect-ratio: 2/3 to match book-cover proportions so
-   object-fit: cover doesn't crop the top/bottom. */
-.series-cover-wrap {
+.series-card .cover-container {
     position: relative;
     width: 100%;
     aspect-ratio: 2 / 3;
     overflow: hidden;
-    background-color: var(--bs-secondary-bg);
+    background-color: var(--muted-bg);
 }
+.series-card .cover-container::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    box-shadow: inset 0 -8px 12px -8px rgba(0,0,0,0.18);
+}
+.series-card .cover-container img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}
+.series-card .no-cover {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 2.5rem;
+}
+
+.series-card .card-body {
+    padding: 0.55rem 0.15rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.18rem;
+    flex: 1;
+}
+.series-card .card-title {
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: var(--ink);
+    line-height: 1.3;
+    margin: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.series-card .card-author {
+    font-size: 0.68rem;
+    color: var(--muted);
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.series-notowned-line {
+    font-size: 0.62rem;
+    color: #b85a2f;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-top: 0.2rem;
+}
+[data-bs-theme=dark] .series-notowned-line { color: #d28b62; }
+
+/* Tier crown on series-card covers — reuse book-card .cover-tier-crown
+   styles. The inset 2px gold/silver hint also reuses book-card rules. */
+.series-card.all-time-fav .cover-container::before,
+.series-card.second-fav   .cover-container::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+}
+.series-card.all-time-fav .cover-container::before { box-shadow: inset 0 0 0 2px #d4af37; }
+.series-card.second-fav   .cover-container::before { box-shadow: inset 0 0 0 2px #b8b8b8; }
+.series-card.all-time-fav .card-stamp { color: #b8902a; }
+.series-card.all-time-fav .card-stamp::after { background: #b8902a; }
+.series-card.second-fav   .card-stamp { color: #7a7a7a; }
+.series-card.second-fav   .card-stamp::after { background: #7a7a7a; }
 
 /* Status badge on standalone tiles (bottom-right of cover). */
 .standalone-status-pill {

@@ -1,41 +1,34 @@
 import { api } from '../api';
 
+// Minimalist book card. Same visual vocabulary as the /recommendations
+// cards: no card chrome, cover is the box, type carries the rest. Stars
+// and heart are inline-interactive — click a star to rate-as-read, click
+// the heart to toggle favourite. Click anywhere else on the card to open
+// the detail page.
 export function bookCardHtml(book: any): string {
     if (book.is_ghost) return ghostCardHtml(book);
+
     const coverImg = book.cover_filename
         ? `<img src="${api.coverUrl(book.user_id, book.cover_filename, book.cover_updated_at)}"
                alt="${escapeHtml(book.title)}" loading="lazy"
                onerror="this.outerHTML='&lt;div class=&quot;no-cover&quot;&gt;&lt;i class=&quot;bi bi-book&quot;&gt;&lt;/i&gt;&lt;/div&gt;'">`
         : `<div class="no-cover"><i class="bi bi-book"></i></div>`;
 
-    const gutterClass = book.reading_status === 'read'
-        ? 'gutter-read'
-        : book.reading_status === 'reading'
-            ? 'gutter-reading'
-            : 'gutter-unread';
-
-    const gutterFav = book.is_favorite
-        ? '<i class="bi bi-heart-fill gutter-fav"></i>'
-        : '';
-
-    let gutterStars = '';
-    if (book.rating) {
-        for (let i = 5; i >= 1; i--) {
-            const filled = i <= book.rating;
-            const icon = filled ? 'bi-star-fill' : 'bi-star';
-            const cls = filled ? 'gutter-star filled' : 'gutter-star';
-            gutterStars += `<i class="bi ${icon} ${cls}"></i>`;
-        }
-    }
-
     const seriesText = book.series
         ? `${escapeHtml(book.series)}${book.series_index ? ` #${book.series_index}` : ''}`
         : '';
-    const seriesInfo = book.series
-        ? book.series_link_id
-            ? `<div class="card-series"><a href="#/series/${book.series_link_id}" class="card-series-link">${seriesText}</a></div>`
-            : `<div class="card-series">${seriesText}</div>`
-        : '';
+
+    // Stamp = small sea-green caps with a hairline tail-rule. Prefer
+    // series name when present (covers the common case); fall back to
+    // the manual category. Linkified when we have a series_link_id.
+    let stampHtml = '';
+    if (book.series) {
+        stampHtml = book.series_link_id
+            ? `<a class="card-stamp card-series-link" href="#/series/${book.series_link_id}">${seriesText}</a>`
+            : `<span class="card-stamp">${seriesText}</span>`;
+    } else if (book.manual_category) {
+        stampHtml = `<span class="card-stamp">${escapeHtml(book.manual_category)}</span>`;
+    }
 
     const ownedClass = book.is_owned === 0 ? ' not-owned' : '';
     const allTimeClass = book.is_all_time_fav === 1
@@ -43,14 +36,24 @@ export function bookCardHtml(book: any): string {
         : book.is_second_fav === 1 ? ' second-fav' : '';
 
     const formatBadge = formatBadgesHtml(book);
-    const allTimeFav = allTimeFavBadgeHtml(book);
+    const tierCrown = tierCrownHtml(book);
+
+    // Cover status accent — thin horizontal bar pinned to the bottom of
+    // the cover that replaces the old side gutter.
+    const statusClass = book.reading_status === 'read'
+        ? 'status-read'
+        : book.reading_status === 'reading'
+            ? 'status-reading'
+            : 'status-unread';
+    const statusBar = `<div class="cover-status ${statusClass}"></div>`;
 
     const progressBar = book.reading_status === 'reading' && book.progress
         ? `<div class="card-progress"><div class="card-progress-fill" style="width:${(book.progress * 100).toFixed(1)}%"></div></div>`
         : '';
 
-    // Status badge — shown below title. The colored gutter on the side
-    // gives a quick scan; this label spells it out so it's not ambiguous.
+    // The "Don't own" / "Reading 35%" status badge below the title spells
+    // out what the accent bar implies — kept because the colour bar alone
+    // isn't unambiguous (especially in dark mode).
     let statusBadge = '';
     if (book.is_owned === 0) {
         statusBadge = '<span class="card-status status-not-owned">Don&rsquo;t own</span>';
@@ -60,58 +63,65 @@ export function bookCardHtml(book: any): string {
         const pct = book.progress ? ` ${Math.round(book.progress * 100)}%` : '';
         statusBadge = `<span class="card-status status-reading"><i class="bi bi-book-half"></i> Reading${pct}</span>`;
     }
-    // owned + unread = no badge (default state, would be noise on every card)
 
+    const rating = Number(book.rating) || 0;
+    const favOn = book.is_favorite ? ' on' : '';
+    const stars = Array.from({ length: 5 }, (_, i) => {
+        const v = i + 1;
+        const cls = v <= rating ? 'card-star filled' : 'card-star';
+        return `<button class="${cls}" data-action="rate" data-val="${v}" type="button">★</button>`;
+    }).join('');
 
     return `
-        <div class="book-card card${ownedClass}${allTimeClass}" data-book-id="${book.id}" role="button">
+        <div class="book-card${ownedClass}${allTimeClass}"
+             data-book-id="${book.id}"
+             data-rating="${rating}"
+             data-favorite="${book.is_favorite ? 1 : 0}"
+             role="button">
             <div class="cover-container">
                 ${coverImg}
+                ${tierCrown}
                 ${formatBadge}
-                ${allTimeFav}
                 ${progressBar}
+                ${statusBar}
             </div>
-            <div class="card-info">
-                <div class="card-gutter ${gutterClass}">
-                    ${gutterFav}
-                    <div class="gutter-stars">${gutterStars}</div>
-                </div>
-                <div class="card-body">
-                    <div class="card-title">${escapeHtml(book.title)}</div>
-                    <div class="card-author">${authorsHtml(book.authors)}</div>
-                    ${seriesInfo}
-                    ${statusBadge}
+            <div class="card-body">
+                ${stampHtml}
+                <div class="card-title">${escapeHtml(book.title)}</div>
+                <div class="card-author">${authorsHtml(book.authors)}</div>
+                ${statusBadge}
+                <div class="card-meta-row">
+                    <div class="card-stars" data-rating="${rating}">${stars}</div>
+                    <button class="card-heart${favOn}" data-action="heart"
+                            type="button" aria-label="Favourite">♥</button>
                 </div>
             </div>
         </div>
     `;
 }
 
-// Ghost: a series_entries row the user doesn't have a book for.
-// Renders as a hollow tile with a "Don't own" badge and an
-// "Add to library" hint. Click navigates to /add prefilled.
+// Ghost: a series_entries row the user doesn't have a book for. Same
+// minimalist shell as a real card; cover is a dashed-outline rectangle,
+// "Don't own" stamp below the title. Click the cover/title → /add prefilled.
 export function ghostCardHtml(book: any): string {
     const seriesText = book.series
         ? `${escapeHtml(book.series)}${book.series_index ? ` #${book.series_index}` : ''}`
         : '';
-    const seriesInfo = book.series
-        ? book.series_link_id
-            ? `<div class="card-series"><a href="#/series/${book.series_link_id}" class="card-series-link">${seriesText}</a></div>`
-            : `<div class="card-series">${seriesText}</div>`
+    const stampHtml = book.series
+        ? (book.series_link_id
+            ? `<a class="card-stamp card-series-link" href="#/series/${book.series_link_id}">${seriesText}</a>`
+            : `<span class="card-stamp">${seriesText}</span>`)
         : '';
 
     const params = new URLSearchParams();
     if (book.title) params.set('title', book.title);
     if (book.authors) params.set('authors', book.authors);
     if (book.series) params.set('series', book.series);
-    if (book.series_index !== null && book.series_index !== undefined) {
+    if (book.series_index != null) {
         params.set('series_index', String(book.series_index));
     }
     const addHref = `#/add?${params.toString()}`;
 
-    // Prefer the Hardcover cover URL on ghost entries when we have
-    // one (loads directly from their CDN, no proxy needed). Falls
-    // back to the placeholder icon when cover_url is null/empty.
     const coverInner = book.cover_url
         ? `<img src="${escapeAttr(book.cover_url)}"
                 alt="${escapeHtml(book.title || '')}" loading="lazy"
@@ -119,37 +129,42 @@ export function ghostCardHtml(book: any): string {
         : `<div class="no-cover"><i class="bi bi-plus-circle"></i></div>`;
 
     return `
-        <div class="book-card card ghost-card" data-add-href="${escapeAttr(addHref)}" role="button" title="Add to library">
+        <div class="book-card ghost-card"
+             data-add-href="${escapeAttr(addHref)}"
+             role="button"
+             title="Add to library">
             <div class="cover-container ghost-cover">
                 ${coverInner}
                 <span class="ghost-badge">Don&rsquo;t own</span>
             </div>
-            <div class="card-info">
-                <div class="card-gutter gutter-unread"></div>
-                <div class="card-body">
-                    <div class="card-title">${escapeHtml(book.title || '')}</div>
-                    <div class="card-author">${escapeHtml(book.authors || '')}</div>
-                    ${seriesInfo}
-                </div>
+            <div class="card-body">
+                ${stampHtml}
+                <div class="card-title">${escapeHtml(book.title || '')}</div>
+                <div class="card-author">${escapeHtml(book.authors || '')}</div>
             </div>
         </div>
     `;
 }
 
-// Special-tier marker for "all-time favorites" — books Gordon would name
-// off the top of his head. Shown as a small gem on the cover, distinct
-// from the format pip (which lives top-right).
-export function allTimeFavBadgeHtml(b: any): string {
-    if (b.is_all_time_fav !== 1) return '';
-    return '<span class="cover-fav-badge" title="All-time favorite"><i class="bi bi-gem"></i></span>';
+// Crown badge on the cover top-left — replaces the old gem. Gold = all-time
+// favourite (is_all_time_fav=1), silver = second tier (is_second_fav=1).
+export function tierCrownHtml(b: any): string {
+    if (b.is_all_time_fav === 1) {
+        return '<span class="cover-tier-crown tier-gold" title="All-time favorite"><i class="bi bi-crown-fill"></i></span>';
+    }
+    if (b.is_second_fav === 1) {
+        return '<span class="cover-tier-crown tier-silver" title="Second favorite"><i class="bi bi-crown"></i></span>';
+    }
+    return '';
 }
 
-// Format pip(s) on the cover corner. The book's primary format
-// (`book_format`) drives the main badge — half-open book (physical),
-// headphones (audiobook), tablet (ebook). A second badge sits next to it
-// when `also_physical=1` and the primary is audiobook/ebook — for the
-// books Gordon owns in both audio AND physical (Harry Potter, Wheel of
-// Time, Lightbringer, Ender's series).
+// Back-compat alias — older call sites expect this name. The crown is the
+// new visual but the function still answers "is this an all-time fav badge?".
+export function allTimeFavBadgeHtml(b: any): string {
+    return tierCrownHtml(b);
+}
+
+// Format pip on the cover corner.
 export function formatBadgeHtml(format: string | undefined | null): string {
     if (format === 'physical') {
         return '<span class="cover-format-badge fmt-physical" title="Physical"><i class="bi bi-book-half"></i></span>';
@@ -172,10 +187,8 @@ export function formatBadgesHtml(book: any): string {
     return primary;
 }
 
-// Books whose series position has a fractional part (e.g. 1.5, 0.5 — typically
-// novellas/short stories) are noise in series views unless the user has read
-// them. Integer positions and standalones (no position) are always shown.
-// Ghosts come through with `position` instead of `series_index`; check both.
+// Books whose series position is fractional (novellas/short stories) are
+// noise in series views unless the user has read them.
 export function isHiddenShortStory(b: any): boolean {
     const raw = b.series_index ?? b.hc_position ?? b.position;
     if (raw == null) return false;
