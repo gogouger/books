@@ -80,6 +80,9 @@ body::before {
     flex-direction: column;
     position: relative;
     padding: 0;
+    /* fill the grid row so every card in a row has the same height —
+       lets us pin the meta row to the bottom for alignment. */
+    height: 100%;
 }
 .book-card:hover { transform: translateY(-2px); }
 
@@ -208,12 +211,15 @@ body::before {
     text-overflow: ellipsis;
 }
 
-/* Inline meta row: stars + heart above a hairline divider. */
+/* Inline meta row: stars + heart above a hairline divider. `margin-top:
+   auto` pushes the row to the bottom of the card body so it lines up
+   across every card in a row, regardless of how many lines the title
+   or author take. */
 .card-meta-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-top: 0.5rem;
+    margin-top: auto;
     padding-top: 0.4rem;
     border-top: 1px solid var(--line);
 }
@@ -818,7 +824,7 @@ body::before {
     display: flex;
     align-items: center;
     gap: 4px;
-    margin-top: 0.5rem;
+    margin-top: auto;
     padding-top: 0.4rem;
     border-top: 1px solid var(--line);
     flex-wrap: nowrap;
@@ -1685,6 +1691,7 @@ body::before {
     display: flex;
     flex-direction: column;
     gap: 0.18rem;
+    flex: 1;
 }
 
 /* Genre/why stamp — tiny accent caps with a hairline tail. */
@@ -1768,7 +1775,7 @@ body::before {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-top: 0.55rem;
+    margin-top: auto;
     padding-top: 0.4rem;
     border-top: 1px solid var(--line);
 }
