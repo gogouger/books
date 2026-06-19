@@ -148,6 +148,7 @@ def compute_metrics(user_id: int) -> dict:
             "count": 0, "read": 0, "value": 0.0,
             "sub_count": Counter(),
             "sub_read": Counter(),
+            "sub_books": {},
         })
         bucket["count"] += 1
         is_read = b["reading_status"] == "read"
@@ -160,9 +161,17 @@ def compute_metrics(user_id: int) -> dict:
             bucket["sub_count"][norm] += 1
             if is_read:
                 bucket["sub_read"][norm] += 1
+            bucket["sub_books"].setdefault(norm, []).append({
+                "id": b["id"],
+                "title": b["title"],
+                "is_read": is_read,
+            })
 
     categories = []
-    for cat in ("Religious", "Fiction", "Other"):
+    # 'Other' is no longer a category we produce; every book lives in
+    # Religious or Fiction. The loop still tolerates legacy rows just in
+    # case but we don't surface an Other section.
+    for cat in ("Religious", "Fiction"):
         if cat not in cat_buckets:
             continue
         bucket = cat_buckets[cat]
@@ -171,8 +180,12 @@ def compute_metrics(user_id: int) -> dict:
                 "name": name,
                 "count": cnt,
                 "read": bucket["sub_read"][name],
+                "books": sorted(
+                    bucket["sub_books"][name],
+                    key=lambda x: (not x["is_read"], x["title"]),
+                )[:60],
             }
-            for name, cnt in bucket["sub_count"].most_common(24)
+            for name, cnt in bucket["sub_count"].most_common(20)
         ]
         categories.append({
             "name": cat,

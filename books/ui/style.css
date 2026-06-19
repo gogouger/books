@@ -1993,6 +1993,83 @@ body::before {
     margin-left: 0.15rem;
 }
 
+/* Hover popup — book list for a sub-genre. Anchored to the chip via
+   position: relative on .metric-subgenre. Reveals on :hover or :focus
+   (for keyboard nav). */
+.metric-subgenre { position: relative; cursor: default; }
+.metric-pop {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 30;
+    min-width: 260px;
+    max-width: 340px;
+    background: var(--panel-bg);
+    border-radius: 8px;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.18), 0 0 0 1px var(--line);
+    padding: 0.55rem 0.55rem 0.45rem;
+    opacity: 0;
+    transform: translateY(-4px);
+    pointer-events: none;
+    transition: opacity 120ms ease, transform 120ms ease;
+}
+.metric-subgenre:hover .metric-pop,
+.metric-subgenre:focus-within .metric-pop {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+.metric-pop-h {
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink);
+    padding: 0 0.15rem 0.3rem;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 0.3rem;
+    font-weight: 500;
+}
+.metric-pop-body {
+    max-height: 320px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+.metric-pop-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.22rem 0.3rem;
+    border-radius: 4px;
+    color: var(--fg);
+    font-size: 0.75rem;
+    text-decoration: none;
+    line-height: 1.3;
+}
+.metric-pop-item:hover {
+    background: var(--muted-bg);
+    color: var(--ink);
+}
+.metric-pop-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    border: 1.5px solid var(--line2);
+}
+.metric-pop-item.is-read .metric-pop-dot {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+.metric-pop-more {
+    font-size: 0.66rem;
+    color: var(--muted);
+    font-style: italic;
+    padding: 0.3rem 0.3rem 0;
+    border-top: 1px solid var(--line);
+    margin-top: 0.3rem;
+}
+
 .metrics-table {
     width: 100%;
     border-collapse: collapse;

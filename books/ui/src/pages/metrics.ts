@@ -26,7 +26,12 @@ type Metrics = {
     categories: Array<{
         name: string; count: number; read: number;
         value: number;
-        subgenres: Array<{ name: string; count: number; read: number }>;
+        subgenres: Array<{
+            name: string;
+            count: number;
+            read: number;
+            books: Array<{ id: number; title: string; is_read: boolean }>;
+        }>;
     }>;
     top_by_value: Array<{
         id: number; title: string; authors: string;
@@ -267,16 +272,33 @@ function renderCategoryBlock(
                   const subPct = s.count
                       ? Math.round(100 * s.read / s.count)
                       : 0;
+                  // Hover popup with each book in the bucket. Read books
+                  // sort first (server-side) and pick up a sea-green dot;
+                  // unread books are muted with an outline dot.
+                  const popupItems = s.books.map(b => `
+                    <a href="#/book/${b.id}" class="metric-pop-item${b.is_read ? ' is-read' : ''}">
+                        <span class="metric-pop-dot"></span>
+                        ${escText(b.title)}
+                    </a>
+                  `).join('');
+                  const more = s.count > s.books.length
+                      ? `<div class="metric-pop-more">+ ${s.count - s.books.length} more</div>`
+                      : '';
                   return `
-                    <span class="metric-subgenre">
+                    <span class="metric-subgenre" tabindex="0">
                         ${escText(s.name)}
                         <span class="metric-subgenre-n">${s.count}</span>
                         <span class="metric-subgenre-pct">${subPct}% read</span>
+                        <div class="metric-pop" role="dialog">
+                            <div class="metric-pop-h">${escText(s.name)} <span class="text-muted">— ${s.read}/${s.count} read</span></div>
+                            <div class="metric-pop-body">${popupItems}</div>
+                            ${more}
+                        </div>
                     </span>
                   `;
               }).join('')}
            </div>`
-        : `<p class="text-muted small mb-0">No sub-genre tags yet. Hit the <em>Auto-fill tags</em> button up top.</p>`;
+        : `<p class="text-muted small mb-0">No sub-genre tags yet.</p>`;
 
     return section(num, c.name, `${c.count} books · ${pct}% read · ${usd(c.value)} spent`, subgenresHtml);
 }
