@@ -126,10 +126,11 @@ function renderForm(
 
                 <div class="mb-3">
                     <label class="form-label">Tier</label>
-                    <div class="d-flex gap-2" id="tier-buttons">
-                        <button type="button" class="btn btn-sm flex-fill ${!book.is_all_time_fav && !book.is_second_fav ? 'btn-secondary' : 'btn-outline-secondary'}" data-tier="none">None</button>
-                        <button type="button" class="btn btn-sm flex-fill ${book.is_second_fav ? 'btn-secondary' : 'btn-outline-secondary'}" data-tier="second" style="${book.is_second_fav ? 'background:#c0c0c0;border-color:#c0c0c0;color:#000' : 'border-color:#c0c0c0;color:#888'}">Silver (2nd fav)</button>
-                        <button type="button" class="btn btn-sm flex-fill ${book.is_all_time_fav ? 'btn-warning' : 'btn-outline-secondary'}" data-tier="all" style="${book.is_all_time_fav ? 'background:#d4af37;border-color:#d4af37;color:#000' : 'border-color:#d4af37;color:#888'}">Gold (all-time fav)</button>
+                    <div class="d-flex gap-2 flex-wrap" id="tier-buttons">
+                        <button type="button" class="btn btn-sm flex-fill ${!book.is_all_time_fav && !book.is_second_fav && !book.is_third_fav ? 'btn-secondary' : 'btn-outline-secondary'}" data-tier="none">None</button>
+                        <button type="button" class="btn btn-sm flex-fill ${book.is_third_fav ? 'btn-secondary' : 'btn-outline-secondary'}" data-tier="third" style="${book.is_third_fav ? 'background:#b08d57;border-color:#b08d57;color:#fff' : 'border-color:#b08d57;color:#8d5e2a'}">Bronze (3rd)</button>
+                        <button type="button" class="btn btn-sm flex-fill ${book.is_second_fav ? 'btn-secondary' : 'btn-outline-secondary'}" data-tier="second" style="${book.is_second_fav ? 'background:#c0c0c0;border-color:#c0c0c0;color:#000' : 'border-color:#c0c0c0;color:#888'}">Silver (2nd)</button>
+                        <button type="button" class="btn btn-sm flex-fill ${book.is_all_time_fav ? 'btn-warning' : 'btn-outline-secondary'}" data-tier="all" style="${book.is_all_time_fav ? 'background:#d4af37;border-color:#d4af37;color:#000' : 'border-color:#d4af37;color:#888'}">Gold (1st)</button>
                     </div>
                 </div>
 
@@ -216,9 +217,10 @@ function renderForm(
     let currentRating = book.rating;
     let currentFavorite = !!book.is_favorite;
     let currentStatus = book.reading_status;
-    let currentTier: 'none' | 'second' | 'all' =
+    let currentTier: 'none' | 'third' | 'second' | 'all' =
         book.is_all_time_fav ? 'all'
-        : book.is_second_fav ? 'second' : 'none';
+        : book.is_second_fav ? 'second'
+        : book.is_third_fav ? 'third' : 'none';
 
     const tierButtons = document.getElementById('tier-buttons')!;
     tierButtons.querySelectorAll('button').forEach(btn => {
@@ -230,6 +232,11 @@ function renderForm(
                 if (t === 'none') {
                     b.className = 'btn btn-sm flex-fill ' + (active ? 'btn-secondary' : 'btn-outline-secondary');
                     (b as HTMLButtonElement).removeAttribute('style');
+                } else if (t === 'third') {
+                    b.className = 'btn btn-sm flex-fill ' + (active ? 'btn-secondary' : 'btn-outline-secondary');
+                    (b as HTMLButtonElement).style.cssText = active
+                        ? 'background:#b08d57;border-color:#b08d57;color:#fff'
+                        : 'border-color:#b08d57;color:#8d5e2a';
                 } else if (t === 'second') {
                     b.className = 'btn btn-sm flex-fill ' + (active ? 'btn-secondary' : 'btn-outline-secondary');
                     (b as HTMLButtonElement).style.cssText = active
@@ -242,7 +249,7 @@ function renderForm(
                         : 'border-color:#d4af37;color:#888';
                 }
             });
-            // Tier ⊆ favorite. Selecting silver/gold implies hearting too.
+            // Tier ⊆ favorite. Selecting any tier implies hearting too.
             if (currentTier !== 'none') currentFavorite = true;
         });
     });
@@ -303,6 +310,7 @@ function renderForm(
             is_favorite: currentFavorite,
             is_all_time_fav: currentTier === 'all',
             is_second_fav: currentTier === 'second',
+            is_third_fav: currentTier === 'third',
             reading_status: currentStatus,
             manual_category: manualCategory,
         };

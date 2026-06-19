@@ -57,6 +57,7 @@ class BookUpdate(BaseModel):
     is_favorite: bool | None = None
     is_all_time_fav: bool | None = None
     is_second_fav: bool | None = None
+    is_third_fav: bool | None = None
     also_physical: bool | None = None
     is_owned: bool | None = None
     manual_category: str | None = None
@@ -557,16 +558,23 @@ def update_book(
         else:
             update_data["series_link_id"] = None
 
-    # Tier invariants: all-time fav implies favorited and clears second-fav.
-    # Setting second-fav clears all-time. Mutually exclusive; both bool.
+    # Tier invariants: gold/silver/bronze are mutually exclusive. Setting
+    # any one of them forces is_favorite=true and clears the other two.
     if update_data.get("is_all_time_fav"):
         update_data["is_favorite"] = True
         update_data["is_second_fav"] = False
+        update_data["is_third_fav"] = False
     if update_data.get("is_second_fav"):
         update_data["is_all_time_fav"] = False
+        update_data["is_third_fav"] = False
+        update_data.setdefault("is_favorite", True)
+    if update_data.get("is_third_fav"):
+        update_data["is_all_time_fav"] = False
+        update_data["is_second_fav"] = False
         update_data.setdefault("is_favorite", True)
     # Coerce bools to 0/1 since the column is INTEGER.
-    for k in ("is_favorite", "is_all_time_fav", "is_second_fav",
+    for k in ("is_favorite",
+              "is_all_time_fav", "is_second_fav", "is_third_fav",
               "also_physical", "is_owned"):
         if k in update_data and isinstance(update_data[k], bool):
             update_data[k] = 1 if update_data[k] else 0

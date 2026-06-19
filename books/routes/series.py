@@ -91,6 +91,7 @@ def get_series(
         "is_favorite": int(us.get("is_favorite") or 0) == 1,
         "is_all_time_fav": int(us.get("is_all_time_fav") or 0) == 1,
         "is_second_fav": int(us.get("is_second_fav") or 0) == 1,
+        "is_third_fav": int(us.get("is_third_fav") or 0) == 1,
         "hardcover_url": (
             f"https://hardcover.app/series/{hardcover_slug}"
             if hardcover_slug else None
@@ -160,6 +161,7 @@ class SeriesUpdate(BaseModel):
     is_favorite: bool | None = None
     is_all_time_fav: bool | None = None
     is_second_fav: bool | None = None
+    is_third_fav: bool | None = None
     entries: list[EntryUpdate] | None = None
     book_ignores: list[BookIgnore] | None = None
 
@@ -200,6 +202,7 @@ def update_series(
         or updates.is_favorite is not None
         or updates.is_all_time_fav is not None
         or updates.is_second_fav is not None
+        or updates.is_third_fav is not None
     )
     if rating_or_fav:
         fields: dict = {}
@@ -211,6 +214,8 @@ def update_series(
             fields["is_all_time_fav"] = updates.is_all_time_fav
         if updates.is_second_fav is not None:
             fields["is_second_fav"] = updates.is_second_fav
+        if updates.is_third_fav is not None:
+            fields["is_third_fav"] = updates.is_third_fav
         db.update_user_series_fields(user_id, series_link_id, fields)
 
     if updates.entries:

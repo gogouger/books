@@ -240,6 +240,7 @@ def init_db() -> None:
     _migrate_book_format()
     _migrate_also_physical()
     _migrate_user_series_rating()
+    _migrate_third_fav()
     _migrate_recommendation_dismissals()
     _migrate_review()
     _migrate_manual_category()
@@ -632,6 +633,31 @@ def _migrate_book_format() -> None:
     conn.execute(
         "ALTER TABLE books ADD COLUMN book_format TEXT DEFAULT 'ebook'"
     )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_third_fav() -> None:
+    """Add is_third_fav column (bronze tier) to both books and user_series.
+
+    Bronze is the 3rd-place all-time tier — books beneath silver but
+    above the bulk 5-star bucket. Mutually exclusive with gold/silver,
+    same invariant pattern (setting any tier implies is_favorite=1).
+    """
+    conn = get_db()
+    for table in ("books", "user_series"):
+        cols = {
+            row[1]
+            for row in conn.execute(
+                f"PRAGMA table_info({table})"
+            ).fetchall()
+        }
+        if "is_third_fav" not in cols:
+            conn.execute(
+                f"ALTER TABLE {table} ADD COLUMN "
+                "is_third_fav INTEGER DEFAULT 0"
+            )
+            log.info("Added is_third_fav to %s", table)
     conn.commit()
     conn.close()
 
@@ -1930,7 +1956,8 @@ def update_book(
         "tags", "date_finished", "published_date",
         "rating", "reading_status", "book_format",
         "progress", "is_favorite", "is_owned",
-        "is_all_time_fav", "is_second_fav", "also_physical",
+        "is_all_time_fav", "is_second_fav", "is_third_fav",
+        "also_physical",
         "series_ignored", "manual_category",
     }
     filtered = {
@@ -2312,6 +2339,7 @@ def get_series_list(
                   us.is_favorite,
                   us.is_all_time_fav,
                   us.is_second_fav,
+                  us.is_third_fav,
                   COUNT(*) as total_books,
                   SUM(CASE WHEN b.reading_status = 'read'
                       THEN 1 ELSE 0 END) as read_count,
@@ -3599,21 +3627,30 @@ def update_user_series_fields(
     same pattern as db.update_book. Pass {"rating": 5, "is_favorite": True}.
     """
     allowed = {
-        "rating", "is_favorite", "is_all_time_fav", "is_second_fav",
+        "rating", "is_favorite",
+        "is_all_time_fav", "is_second_fav", "is_third_fav",
         "monitored", "series_complete", "display_name",
     }
     filtered = {k: v for k, v in fields.items() if k in allowed}
     # Coerce bools to 0/1 for INTEGER columns
-    for k in ("is_favorite", "is_all_time_fav", "is_second_fav",
+    for k in ("is_favorite",
+              "is_all_time_fav", "is_second_fav", "is_third_fav",
               "monitored", "series_complete"):
         if k in filtered and isinstance(filtered[k], bool):
             filtered[k] = 1 if filtered[k] else 0
-    # Mutual exclusion + favorite implication (matches book Tier handler)
+    # Mutual exclusion + favorite implication: setting any one tier
+    # clears the other two and forces is_favorite=1.
     if filtered.get("is_all_time_fav"):
         filtered["is_favorite"] = 1
         filtered["is_second_fav"] = 0
+        filtered["is_third_fav"] = 0
     if filtered.get("is_second_fav"):
         filtered["is_all_time_fav"] = 0
+        filtered["is_third_fav"] = 0
+        filtered.setdefault("is_favorite", 1)
+    if filtered.get("is_third_fav"):
+        filtered["is_all_time_fav"] = 0
+        filtered["is_second_fav"] = 0
         filtered.setdefault("is_favorite", 1)
     if not filtered:
         return False

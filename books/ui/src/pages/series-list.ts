@@ -368,16 +368,21 @@ export function attachSeriesGridHandlers(container: HTMLElement): void {
             } else if (action === 'heart') {
                 const on = target.classList.contains('is-on');
                 patch = { is_favorite: !on };
+            } else if (action === 'bronze') {
+                const on = target.classList.contains('is-on');
+                patch = on
+                    ? { is_third_fav: false }
+                    : { is_third_fav: true, is_second_fav: false, is_all_time_fav: false };
             } else if (action === 'silver') {
                 const on = target.classList.contains('is-on');
                 patch = on
                     ? { is_second_fav: false }
-                    : { is_second_fav: true, is_all_time_fav: false };
+                    : { is_second_fav: true, is_all_time_fav: false, is_third_fav: false };
             } else if (action === 'gold') {
                 const on = target.classList.contains('is-on');
                 patch = on
                     ? { is_all_time_fav: false }
-                    : { is_all_time_fav: true, is_second_fav: false };
+                    : { is_all_time_fav: true, is_second_fav: false, is_third_fav: false };
             }
             const username = getLibraryUsername();
             if (!username) return;
@@ -406,7 +411,8 @@ export function renderSeriesCard(s: any): string {
     const ongoingClass = s.series_complete === 0 ? ' series-card-ongoing' : '';
     const tierClass =
         s.is_all_time_fav === 1 ? ' series-card--gold all-time-fav'
-        : s.is_second_fav === 1 ? ' series-card--silver second-fav' : '';
+        : s.is_second_fav === 1 ? ' series-card--silver second-fav'
+        : s.is_third_fav === 1 ? ' series-card--bronze third-fav' : '';
 
     const segmentsHtml = renderSegmentedBar(
         s.status_seq || '', s.owned_seq || '',
@@ -436,9 +442,11 @@ export function renderSeriesCard(s: any): string {
 
     const tierCrown =
         s.is_all_time_fav === 1
-            ? '<span class="cover-tier-crown tier-gold" title="All-time favorite"><i class="bi bi-crown-fill"></i></span>'
+            ? '<span class="cover-tier-crown tier-gold" title="#1 all-time"><i class="bi bi-crown-fill"></i></span>'
         : s.is_second_fav === 1
-            ? '<span class="cover-tier-crown tier-silver" title="Second favorite"><i class="bi bi-crown"></i></span>'
+            ? '<span class="cover-tier-crown tier-silver" title="#2 all-time"><i class="bi bi-crown"></i></span>'
+        : s.is_third_fav === 1
+            ? '<span class="cover-tier-crown tier-bronze" title="#3 all-time"><i class="bi bi-award-fill"></i></span>'
         : '';
 
     const notOwnedLine = notOwnedCount > 0
@@ -449,6 +457,7 @@ export function renderSeriesCard(s: any): string {
     const inlineControls = renderInlineSeriesControls(
         s.series_link_id, userRating, s.is_favorite === 1,
         s.is_all_time_fav === 1, s.is_second_fav === 1,
+        s.is_third_fav === 1,
     );
 
     return `
@@ -481,6 +490,7 @@ function renderInlineSeriesControls(
     isFavorite: boolean,
     isAllTime: boolean,
     isSecond: boolean,
+    isThird: boolean,
 ): string {
     const stars: string[] = [];
     for (let i = 1; i <= 5; i++) {
@@ -491,6 +501,9 @@ function renderInlineSeriesControls(
     const heartCls = isFavorite
         ? 'series-card-btn series-card-btn--heart is-on'
         : 'series-card-btn series-card-btn--heart';
+    const bronzeCls = isThird
+        ? 'series-card-btn series-card-btn--bronze is-on'
+        : 'series-card-btn series-card-btn--bronze';
     const silverCls = isSecond
         ? 'series-card-btn series-card-btn--silver is-on'
         : 'series-card-btn series-card-btn--silver';
@@ -503,11 +516,14 @@ function renderInlineSeriesControls(
             <button type="button" class="${heartCls}" data-action="heart" data-series-id="${seriesId}" title="Like series">
                 <i class="bi ${isFavorite ? 'bi-heart-fill' : 'bi-heart'}"></i>
             </button>
-            <button type="button" class="${silverCls}" data-action="silver" data-series-id="${seriesId}" title="Silver — 2nd favorite">
-                <i class="bi bi-gem"></i>
+            <button type="button" class="${bronzeCls}" data-action="bronze" data-series-id="${seriesId}" title="Bronze — #3 all-time">
+                <i class="bi bi-award"></i>
             </button>
-            <button type="button" class="${goldCls}" data-action="gold" data-series-id="${seriesId}" title="Gold — all-time favorite">
-                <i class="bi bi-trophy-fill"></i>
+            <button type="button" class="${silverCls}" data-action="silver" data-series-id="${seriesId}" title="Silver — #2 all-time">
+                <i class="bi bi-crown"></i>
+            </button>
+            <button type="button" class="${goldCls}" data-action="gold" data-series-id="${seriesId}" title="Gold — #1 all-time">
+                <i class="bi bi-crown-fill"></i>
             </button>
         </div>
     `;

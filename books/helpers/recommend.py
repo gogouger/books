@@ -144,14 +144,17 @@ def gather_seeds(user_id: int) -> dict:
     book_rows = conn.execute(
         """
         SELECT id, title, authors, series, series_link_id,
-               is_all_time_fav, is_second_fav, rating, cover_filename
+               is_all_time_fav, is_second_fav, is_third_fav,
+               rating, cover_filename
         FROM books
         WHERE user_id = ?
           AND (is_all_time_fav = 1
                OR is_second_fav = 1
+               OR is_third_fav = 1
                OR rating = 5)
         ORDER BY is_all_time_fav DESC,
                  is_second_fav DESC,
+                 is_third_fav DESC,
                  COALESCE(rating, 0) DESC
         """,
         (user_id,),
@@ -159,12 +162,14 @@ def gather_seeds(user_id: int) -> dict:
     series_rows = conn.execute(
         """
         SELECT us.series_link_id, sl.series_name,
-               us.rating, us.is_all_time_fav, us.is_second_fav
+               us.rating,
+               us.is_all_time_fav, us.is_second_fav, us.is_third_fav
         FROM user_series us
         JOIN series_link sl ON sl.id = us.series_link_id
         WHERE us.user_id = ?
           AND (us.is_all_time_fav = 1
                OR us.is_second_fav = 1
+               OR us.is_third_fav = 1
                OR us.rating = 5)
         """,
         (user_id,),
@@ -230,6 +235,7 @@ def next_in_series(user_id: int) -> list[dict]:
         ORDER BY
             (us.is_all_time_fav = 1) DESC,
             (us.is_second_fav = 1) DESC,
+            (us.is_third_fav = 1) DESC,
             COALESCE(us.rating, 0) DESC,
             sl.series_name
         LIMIT 24

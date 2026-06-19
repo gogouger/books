@@ -49,12 +49,14 @@ export async function renderFavs(): Promise<void> {
         const favSeries = allSeries.filter((s: any) =>
             s.is_all_time_fav === 1
             || s.is_second_fav === 1
+            || s.is_third_fav === 1
             || s.is_favorite === 1,
         );
         const seriesTier = (s: any) =>
             s.is_all_time_fav === 1 ? 0
             : s.is_second_fav === 1 ? 1
-            : 2;
+            : s.is_third_fav === 1 ? 2
+            : 3;
         favSeries.sort((a: any, b: any) => {
             const t = seriesTier(a) - seriesTier(b);
             if (t !== 0) return t;
@@ -84,15 +86,21 @@ export async function renderFavs(): Promise<void> {
             seriesRow += '</div>';
         }
 
-        // Sort within each bucket: gold (all-time fav) first, then silver
-        // (second fav), then 5-star, then hearted-only. Tiebreak by title.
-        // Silver was missing from the hierarchy — books like
-        // 'God the Son Incarnate' (silver) fell after 5-star.
+        // Sort within each bucket. Full hierarchy:
+        //   0 gold (is_all_time_fav)
+        //   1 silver (is_second_fav)
+        //   2 bronze (is_third_fav)
+        //   3 5-star AND hearted
+        //   4 5-star alone
+        //   5 hearted alone
+        // Tiebreak by title.
         const tier = (b: any) =>
             b.is_all_time_fav === 1 ? 0
             : b.is_second_fav === 1 ? 1
-            : b.rating === 5 ? 2
-            : 3;
+            : b.is_third_fav === 1 ? 2
+            : b.rating === 5 && b.is_favorite === 1 ? 3
+            : b.rating === 5 ? 4
+            : 5;
         const sortFn = (a: any, b: any) => {
             const t = tier(a) - tier(b);
             if (t !== 0) return t;

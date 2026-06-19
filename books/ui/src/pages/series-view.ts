@@ -115,14 +115,16 @@ export async function renderSeriesView(
         const isFavorite: boolean = !!data.is_favorite;
         const isAllTimeFav: boolean = !!data.is_all_time_fav;
         const isSecondFav: boolean = !!data.is_second_fav;
+        const isThirdFav: boolean = !!data.is_third_fav;
 
         const ratingControls = isOwner
-            ? renderSeriesRatingControls(userRating, isFavorite, isAllTimeFav, isSecondFav)
-            : renderSeriesRatingReadonly(userRating, isFavorite, isAllTimeFav, isSecondFav);
+            ? renderSeriesRatingControls(userRating, isFavorite, isAllTimeFav, isSecondFav, isThirdFav)
+            : renderSeriesRatingReadonly(userRating, isFavorite, isAllTimeFav, isSecondFav, isThirdFav);
 
         const tierClass =
             isAllTimeFav ? ' series-header--gold'
-            : isSecondFav ? ' series-header--silver' : '';
+            : isSecondFav ? ' series-header--silver'
+            : isThirdFav ? ' series-header--bronze' : '';
 
         let html = `
             <div class="d-flex align-items-center flex-wrap gap-1 mb-3">
@@ -283,22 +285,27 @@ function renderSeriesRatingControls(
     isFavorite: boolean,
     isAllTime: boolean,
     isSecond: boolean,
+    isThird: boolean,
 ): string {
     const heartIcon = isFavorite ? 'bi-heart-fill' : 'bi-heart';
     const heartCls = isFavorite ? 'series-fav-btn is-on' : 'series-fav-btn';
     const goldCls = isAllTime ? 'series-tier-btn series-tier-btn--gold is-on' : 'series-tier-btn series-tier-btn--gold';
     const silverCls = isSecond ? 'series-tier-btn series-tier-btn--silver is-on' : 'series-tier-btn series-tier-btn--silver';
+    const bronzeCls = isThird ? 'series-tier-btn series-tier-btn--bronze is-on' : 'series-tier-btn series-tier-btn--bronze';
     return `
         <div class="series-rating-row">
             ${renderStars(rating, true)}
             <button type="button" class="${heartCls}" id="series-fav-toggle" title="Like series">
                 <i class="bi ${heartIcon}"></i>
             </button>
-            <button type="button" class="${silverCls}" id="series-silver-toggle" title="Mark as 2nd favorite (silver)">
-                <i class="bi bi-gem"></i>
+            <button type="button" class="${bronzeCls}" id="series-bronze-toggle" title="Bronze — #3 all-time">
+                <i class="bi bi-award"></i>
             </button>
-            <button type="button" class="${goldCls}" id="series-gold-toggle" title="Mark as all-time favorite (gold)">
-                <i class="bi bi-trophy-fill"></i>
+            <button type="button" class="${silverCls}" id="series-silver-toggle" title="Silver — #2 all-time">
+                <i class="bi bi-crown"></i>
+            </button>
+            <button type="button" class="${goldCls}" id="series-gold-toggle" title="Gold — #1 all-time">
+                <i class="bi bi-crown-fill"></i>
             </button>
         </div>
     `;
@@ -309,15 +316,18 @@ function renderSeriesRatingReadonly(
     isFavorite: boolean,
     isAllTime: boolean,
     isSecond: boolean,
+    isThird: boolean,
 ): string {
-    if (!rating && !isFavorite && !isAllTime && !isSecond) return '';
+    if (!rating && !isFavorite && !isAllTime && !isSecond && !isThird) return '';
     const heart = isFavorite
         ? '<span class="series-fav-btn is-on" title="Favorite"><i class="bi bi-heart-fill"></i></span>'
         : '';
     const tier = isAllTime
-        ? '<span class="series-tier-btn series-tier-btn--gold is-on" title="All-time fav"><i class="bi bi-trophy-fill"></i></span>'
+        ? '<span class="series-tier-btn series-tier-btn--gold is-on" title="#1 all-time"><i class="bi bi-crown-fill"></i></span>'
         : isSecond
-            ? '<span class="series-tier-btn series-tier-btn--silver is-on" title="2nd fav"><i class="bi bi-gem"></i></span>'
+            ? '<span class="series-tier-btn series-tier-btn--silver is-on" title="#2 all-time"><i class="bi bi-crown"></i></span>'
+        : isThird
+            ? '<span class="series-tier-btn series-tier-btn--bronze is-on" title="#3 all-time"><i class="bi bi-award-fill"></i></span>'
             : '';
     return `<div class="series-rating-row">${renderStars(rating, false)}${heart}${tier}</div>`;
 }
@@ -343,18 +353,25 @@ function attachSeriesRatingHandlers(
         const on = (e.currentTarget as HTMLElement).classList.contains('is-on');
         onChange({ is_favorite: !on });
     });
+    app.querySelector('#series-bronze-toggle')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const on = (e.currentTarget as HTMLElement).classList.contains('is-on');
+        onChange(on
+            ? { is_third_fav: false }
+            : { is_third_fav: true, is_second_fav: false, is_all_time_fav: false });
+    });
     app.querySelector('#series-silver-toggle')?.addEventListener('click', (e) => {
         e.stopPropagation();
         const on = (e.currentTarget as HTMLElement).classList.contains('is-on');
         onChange(on
             ? { is_second_fav: false }
-            : { is_second_fav: true, is_all_time_fav: false });
+            : { is_second_fav: true, is_all_time_fav: false, is_third_fav: false });
     });
     app.querySelector('#series-gold-toggle')?.addEventListener('click', (e) => {
         e.stopPropagation();
         const on = (e.currentTarget as HTMLElement).classList.contains('is-on');
         onChange(on
             ? { is_all_time_fav: false }
-            : { is_all_time_fav: true, is_second_fav: false });
+            : { is_all_time_fav: true, is_second_fav: false, is_third_fav: false });
     });
 }

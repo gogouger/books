@@ -33,7 +33,8 @@ export function bookCardHtml(book: any): string {
     const ownedClass = book.is_owned === 0 ? ' not-owned' : '';
     const allTimeClass = book.is_all_time_fav === 1
         ? ' all-time-fav'
-        : book.is_second_fav === 1 ? ' second-fav' : '';
+        : book.is_second_fav === 1 ? ' second-fav'
+        : book.is_third_fav === 1 ? ' third-fav' : '';
 
     const formatBadge = formatBadgesHtml(book);
     const tierCrown = tierCrownHtml(book);
@@ -146,14 +147,18 @@ export function ghostCardHtml(book: any): string {
     `;
 }
 
-// Crown badge on the cover top-left — replaces the old gem. Gold = all-time
-// favourite (is_all_time_fav=1), silver = second tier (is_second_fav=1).
+// Crown / wreath badge on the cover top-left. Gold = #1 all-time
+// (is_all_time_fav), silver = #2 (is_second_fav), bronze = #3 (is_third_fav).
+// Distinct icon per tier so the rank is unmistakable at a glance.
 export function tierCrownHtml(b: any): string {
     if (b.is_all_time_fav === 1) {
-        return '<span class="cover-tier-crown tier-gold" title="All-time favorite"><i class="bi bi-crown-fill"></i></span>';
+        return '<span class="cover-tier-crown tier-gold" title="#1 all-time favorite"><i class="bi bi-crown-fill"></i></span>';
     }
     if (b.is_second_fav === 1) {
-        return '<span class="cover-tier-crown tier-silver" title="Second favorite"><i class="bi bi-crown"></i></span>';
+        return '<span class="cover-tier-crown tier-silver" title="#2 all-time favorite"><i class="bi bi-crown"></i></span>';
+    }
+    if (b.is_third_fav === 1) {
+        return '<span class="cover-tier-crown tier-bronze" title="#3 all-time favorite"><i class="bi bi-award-fill"></i></span>';
     }
     return '';
 }

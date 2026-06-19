@@ -354,19 +354,17 @@ body::before {
 /* Gold / silver tier — clean crown badge on the cover top-left, plus a
    subtle 2px inset on the cover frame (no full-card border, no glow). */
 .book-card.all-time-fav .cover-container::before,
-.book-card.second-fav .cover-container::before {
+.book-card.second-fav .cover-container::before,
+.book-card.third-fav .cover-container::before {
     content: "";
     position: absolute;
     inset: 0;
     pointer-events: none;
     z-index: 1;
 }
-.book-card.all-time-fav .cover-container::before {
-    box-shadow: inset 0 0 0 2px #d4af37;
-}
-.book-card.second-fav .cover-container::before {
-    box-shadow: inset 0 0 0 2px #b8b8b8;
-}
+.book-card.all-time-fav .cover-container::before { box-shadow: inset 0 0 0 2px #d4af37; }
+.book-card.second-fav   .cover-container::before { box-shadow: inset 0 0 0 2px #b8b8b8; }
+.book-card.third-fav    .cover-container::before { box-shadow: inset 0 0 0 2px #b08d57; }
 
 /* Crown badge — tiny gilded chip in the cover's top-left corner. */
 .cover-tier-crown {
@@ -392,6 +390,10 @@ body::before {
     background: linear-gradient(135deg, #e8e8e8 0%, #9c9c9c 100%);
     color: #2a2a2a;
 }
+.cover-tier-crown.tier-bronze {
+    background: linear-gradient(135deg, #d99860 0%, #8d5e2a 100%);
+    color: #2a1a05;
+}
 .cover-tier-crown .bi { font-size: 0.78rem; }
 
 /* Tier-aware stamp tone in the body — title nudges into gold/silver
@@ -400,6 +402,8 @@ body::before {
 .book-card.all-time-fav .card-stamp::after { background: #b8902a; }
 .book-card.second-fav  .card-stamp { color: #7a7a7a; }
 .book-card.second-fav  .card-stamp::after { background: #7a7a7a; }
+.book-card.third-fav   .card-stamp { color: #8d5e2a; }
+.book-card.third-fav   .card-stamp::after { background: #8d5e2a; }
 
 /* Detail page mirrors the same approach: crown is positioned by markup,
    and the cover gets the same 2px inset rather than the previous border+glow. */
@@ -412,6 +416,11 @@ body::before {
 .detail-cover-wrap.second-fav .cover-large,
 .detail-cover-wrap.second-fav .no-cover-large {
     box-shadow: inset 0 0 0 3px #b8b8b8;
+    border-radius: 4px;
+}
+.detail-cover-wrap.third-fav .cover-large,
+.detail-cover-wrap.third-fav .no-cover-large {
+    box-shadow: inset 0 0 0 3px #b08d57;
     border-radius: 4px;
 }
 
@@ -740,6 +749,11 @@ body::before {
     background: color-mix(in srgb, #c0c0c0 8%, transparent);
     box-shadow: 0 0 0 1px rgba(192, 192, 192, 0.15);
 }
+.series-header--bronze {
+    border-color: #b08d57;
+    background: color-mix(in srgb, #b08d57 8%, transparent);
+    box-shadow: 0 0 0 1px rgba(176, 141, 87, 0.18);
+}
 
 .series-rating-row {
     display: inline-flex;
@@ -802,6 +816,11 @@ body::before {
     color: #5a4400;
     border-color: #d4af37;
     background: color-mix(in srgb, #d4af37 22%, transparent);
+}
+.series-tier-btn--bronze.is-on {
+    color: #6e451c;
+    border-color: #b08d57;
+    background: color-mix(in srgb, #b08d57 22%, transparent);
 }
 
 /* Tier borders on series-list cards (mirrors book-card.all-time-fav /
@@ -866,7 +885,9 @@ body::before {
 .series-card-btn--heart.is-on { color: #c2454e; }
 .series-card-btn--silver.is-on { color: #7a7a7a; }
 .series-card-btn--gold.is-on { color: #b8902a; }
+.series-card-btn--bronze.is-on { color: #8d5e2a; }
 [data-bs-theme=dark] .series-card-btn--heart.is-on { color: #ec6973; }
+[data-bs-theme=dark] .series-card-btn--bronze.is-on { color: #d99860; }
 
 /* Book detail */
 .book-detail {
@@ -1122,7 +1143,8 @@ body::before {
 /* Tier crown on series-card covers — reuse book-card .cover-tier-crown
    styles. The inset 2px gold/silver hint also reuses book-card rules. */
 .series-card.all-time-fav .cover-container::before,
-.series-card.second-fav   .cover-container::before {
+.series-card.second-fav   .cover-container::before,
+.series-card.third-fav    .cover-container::before {
     content: "";
     position: absolute;
     inset: 0;
@@ -1131,10 +1153,13 @@ body::before {
 }
 .series-card.all-time-fav .cover-container::before { box-shadow: inset 0 0 0 2px #d4af37; }
 .series-card.second-fav   .cover-container::before { box-shadow: inset 0 0 0 2px #b8b8b8; }
+.series-card.third-fav    .cover-container::before { box-shadow: inset 0 0 0 2px #b08d57; }
 .series-card.all-time-fav .card-stamp { color: #b8902a; }
 .series-card.all-time-fav .card-stamp::after { background: #b8902a; }
 .series-card.second-fav   .card-stamp { color: #7a7a7a; }
 .series-card.second-fav   .card-stamp::after { background: #7a7a7a; }
+.series-card.third-fav    .card-stamp { color: #8d5e2a; }
+.series-card.third-fav    .card-stamp::after { background: #8d5e2a; }
 
 /* Status badge on standalone tiles (bottom-right of cover). */
 .standalone-status-pill {
