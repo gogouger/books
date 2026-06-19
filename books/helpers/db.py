@@ -241,6 +241,7 @@ def init_db() -> None:
     _migrate_also_physical()
     _migrate_user_series_rating()
     _migrate_third_fav()
+    _migrate_price()
     _migrate_recommendation_dismissals()
     _migrate_review()
     _migrate_manual_category()
@@ -658,6 +659,25 @@ def _migrate_third_fav() -> None:
                 "is_third_fav INTEGER DEFAULT 0"
             )
             log.info("Added is_third_fav to %s", table)
+    conn.commit()
+    conn.close()
+
+
+def _migrate_price() -> None:
+    """Add price REAL column to books (USD, nullable).
+
+    Used by the /metrics page to compute library value. Existing books
+    pre-this migration won't have a price set; they contribute 0 to the
+    total and the metrics endpoint reports them as 'unpriced'.
+    """
+    conn = get_db()
+    cols = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(books)").fetchall()
+    }
+    if "price" not in cols:
+        conn.execute("ALTER TABLE books ADD COLUMN price REAL")
+        log.info("Added price column to books")
     conn.commit()
     conn.close()
 
@@ -1959,6 +1979,7 @@ def update_book(
         "is_all_time_fav", "is_second_fav", "is_third_fav",
         "also_physical",
         "series_ignored", "manual_category",
+        "price",
     }
     filtered = {
         k: v for k, v in updates.items() if k in allowed

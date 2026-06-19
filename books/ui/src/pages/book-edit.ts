@@ -125,6 +125,19 @@ function renderForm(
                 </div>
 
                 <div class="mb-3">
+                    <label class="form-label" for="price-input">Price paid</label>
+                    <div class="input-group input-group-sm" style="max-width: 220px">
+                        <span class="input-group-text">$</span>
+                        <input type="number" class="form-control"
+                               id="price-input" step="0.01" min="0"
+                               placeholder="${suggestedPricePlaceholder(book.book_format)}"
+                               value="${book.price != null ? Number(book.price).toFixed(2) : ''}">
+                        <button type="button" class="btn btn-outline-secondary"
+                                id="price-clear-btn" title="Clear price">×</button>
+                    </div>
+                </div>
+
+                <div class="mb-3">
                     <label class="form-label">Tier</label>
                     <div class="d-flex gap-2 flex-wrap" id="tier-buttons">
                         <button type="button" class="btn btn-sm flex-fill ${!book.is_all_time_fav && !book.is_second_fav && !book.is_third_fav ? 'btn-secondary' : 'btn-outline-secondary'}" data-tier="none">None</button>
@@ -259,6 +272,14 @@ function renderForm(
         (rating) => { currentRating = rating || null; }
     );
 
+    // Price clear button — wipes the input back to empty (which we save as
+    // null on submit) without forcing the user to select+delete.
+    document.getElementById('price-clear-btn')?.addEventListener('click', () => {
+        const inp = document.getElementById('price-input') as HTMLInputElement;
+        inp.value = '';
+        inp.focus();
+    });
+
     attachFavoriteHandler(
         document.getElementById('favorite-container')!,
         (isFavorite) => { currentFavorite = isFavorite; }
@@ -296,6 +317,8 @@ function renderForm(
         const dateFinished = (document.getElementById('edit-date-finished') as HTMLInputElement).value || null;
         const description = (document.getElementById('edit-description') as HTMLTextAreaElement).value.trim() || null;
         const manualCategory = (document.getElementById('edit-manual-category') as HTMLSelectElement).value || null;
+        const priceRaw = (document.getElementById('price-input') as HTMLInputElement).value.trim();
+        const price = priceRaw === '' ? null : Number(priceRaw);
 
         const updates: Record<string, any> = {
             title,
@@ -313,6 +336,7 @@ function renderForm(
             is_third_fav: currentTier === 'third',
             reading_status: currentStatus,
             manual_category: manualCategory,
+            price: Number.isFinite(price) ? price : null,
         };
 
         const saveBtn = document.getElementById('save-btn') as HTMLButtonElement;
@@ -374,6 +398,14 @@ function renderForm(
             });
         }
     }
+}
+
+// Format-aware price placeholder so the user gets a sensible suggestion
+// (median US retail at time of writing) without forcing auto-fill.
+function suggestedPricePlaceholder(format: string | null | undefined): string {
+    if (format === 'audiobook') return '14.95';
+    if (format === 'ebook') return '9.99';
+    return '15.00';
 }
 
 function escapeHtml(text: string): string {

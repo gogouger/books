@@ -17,7 +17,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, field_validator
 
-from ..helpers import db, hardcover
+from ..helpers import db, hardcover, metrics as metrics_helper
 from ..helpers.auth import (
     library_owner,
     optional_user,
@@ -61,6 +61,7 @@ class BookUpdate(BaseModel):
     also_physical: bool | None = None
     is_owned: bool | None = None
     manual_category: str | None = None
+    price: float | None = None
 
     @field_validator("rating")
     @classmethod
@@ -104,6 +105,13 @@ def _is_owner(
     if viewer is None:
         return False
     return viewer["user_id"] == owner["id"] or viewer.get("is_superuser")
+
+
+@router.get("/metrics")
+def get_metrics(auth: require_owner) -> dict:
+    """Owner-only library metrics: counts, value, tier + category + sub-genre
+    breakdowns, top-N by price."""
+    return metrics_helper.compute_metrics(auth["user_id"])
 
 
 # --- Read-only routes (anonymous or authenticated) ---

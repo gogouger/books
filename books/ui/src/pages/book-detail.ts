@@ -126,7 +126,8 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
     // Tier border (same gold/silver treatment as the card grid) + format
     // pip in the top-right corner — single source of truth in book-card.ts.
     const tierClass = book.is_all_time_fav ? ' all-time-fav'
-        : book.is_second_fav ? ' second-fav' : '';
+        : book.is_second_fav ? ' second-fav'
+        : book.is_third_fav ? ' third-fav' : '';
     const fmtBadge = formatBadgesHtml(book);
     const goldGemBadge = allTimeFavBadgeHtml(book);
 
@@ -168,6 +169,10 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
 
     const publishedHtml = book.published_date
         ? `<div class="text-muted mb-2 small">Published: ${escapeHtml(book.published_date)}</div>`
+        : '';
+
+    const priceHtml = book.price != null
+        ? `<div class="text-muted mb-2 small">Paid: $${Number(book.price).toFixed(2)}</div>`
         : '';
 
     // Rating: editable for owner, static for viewer
@@ -269,6 +274,7 @@ function renderBook(app: HTMLElement, book: any, username: string): void {
                     <h5 class="text-muted">${authorsDetailHtml(book.authors)}</h5>
                     ${seriesHtml}
                     ${publishedHtml}
+                    ${priceHtml}
 
                     <div class="detail-panel">
                         <div class="detail-rating-row mb-3">

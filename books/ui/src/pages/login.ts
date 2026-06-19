@@ -34,6 +34,7 @@ export function updateNavbar(): void {
     const navAddItem = document.getElementById('nav-add-item')!;
     const navScanItem = document.getElementById('nav-scan-item')!;
     const navRecsItem = document.getElementById('nav-recs-item')!;
+    const navMetricsItem = document.getElementById('nav-metrics-item')!;
 
     // Reset visibility
     navLinks.style.display = 'none';
@@ -41,6 +42,7 @@ export function updateNavbar(): void {
     navAddItem.style.display = 'none';
     navScanItem.style.display = 'none';
     navRecsItem.style.display = 'none';
+    navMetricsItem.style.display = 'none';
     navUsername.textContent = '';
     navLogout.classList.add('d-none');
     navSignin.classList.add('d-none');
@@ -81,6 +83,7 @@ export function updateNavbar(): void {
         navAddItem.style.display = '';
         navScanItem.style.display = '';
         navRecsItem.style.display = '';
+        navMetricsItem.style.display = '';
         navUsername.textContent = user.display_name;
         navLogout.classList.remove('d-none');
         navLogout.onclick = (e) => {

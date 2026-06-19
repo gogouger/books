@@ -286,6 +286,10 @@ export const api = {
         });
     },
 
+    async getMetrics(username: string): Promise<any> {
+        return apiFetch(`/${username}/metrics`);
+    },
+
     async getRecommendations(username: string): Promise<any> {
         return apiFetch(`/${username}/recommendations`);
     },

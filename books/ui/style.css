@@ -1867,3 +1867,143 @@ body::before {
     .rec-card { flex-basis: 144px; }
     .rec-title { font-size: 0.78rem; }
 }
+
+/* --- /metrics page --------------------------------------------------- */
+/* Same minimal vocabulary as /recommendations — numbered uppercase
+   sections with a sea-green tab, hairline rules, italic subtitles. */
+
+.metric-section { margin-bottom: 2rem; }
+.metric-section-num {
+    font-size: 0.66rem;
+    letter-spacing: 0.18em;
+    color: var(--muted);
+    text-transform: uppercase;
+}
+.metric-section-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.85rem;
+    margin: 0 0 0.25rem;
+}
+.metric-section-title {
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink);
+    white-space: nowrap;
+}
+.metric-section-rule { flex: 1; height: 1px; background: var(--line2); align-self: center; }
+.metric-section-subtitle {
+    margin: 0 0 0.95rem;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-style: italic;
+}
+
+.metric-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.85rem;
+}
+.metric-tile {
+    background: var(--panel-bg);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    box-shadow: 0 1px 0 var(--line), 0 1px 3px rgba(0,0,0,0.04);
+}
+.metric-tile-num {
+    font-size: 1.6rem;
+    font-weight: 500;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+}
+.metric-tile-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-top: 0.4rem;
+}
+.metric-tile-hint {
+    font-size: 0.7rem;
+    color: var(--muted);
+    font-style: italic;
+    margin-top: 0.15rem;
+}
+
+.metric-row {
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.1rem;
+}
+.metric-row--wrap { flex-wrap: wrap; }
+.metric-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    padding: 0.4rem 0.7rem;
+    border-radius: 999px;
+    background: var(--panel-bg);
+    border: 1px solid var(--line);
+    font-size: 0.78rem;
+    color: var(--muted);
+    white-space: nowrap;
+}
+.metric-chip-n {
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--ink);
+}
+.metric-chip-label { letter-spacing: 0.03em; }
+.metric-chip--gold   { border-color: #d4af37; }
+.metric-chip--gold   .metric-chip-n { color: #b8902a; }
+.metric-chip--silver { border-color: #c0c0c0; }
+.metric-chip--silver .metric-chip-n { color: #7a7a7a; }
+.metric-chip--bronze { border-color: #b08d57; }
+.metric-chip--bronze .metric-chip-n { color: #8d5e2a; }
+.metric-chip--star   { border-color: #c8893b; }
+.metric-chip--star   .metric-chip-n { color: #c8893b; }
+.metric-chip--heart  { border-color: #c2454e; }
+.metric-chip--heart  .metric-chip-n { color: #c2454e; }
+
+.metric-subgenre {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    padding: 0.3rem 0.55rem;
+    border-radius: 4px;
+    background: var(--muted-bg);
+    font-size: 0.74rem;
+    color: var(--fg);
+}
+.metric-subgenre-n {
+    color: var(--accent);
+    font-weight: 500;
+    font-size: 0.78rem;
+}
+
+.metrics-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+.metrics-table th,
+.metrics-table td {
+    text-align: left;
+    padding: 0.5rem 0.6rem;
+    border-bottom: 1px solid var(--line);
+}
+.metrics-table th {
+    color: var(--muted);
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.66rem;
+}
+.metrics-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.metrics-table tbody tr:last-child td { border-bottom: 0; }
