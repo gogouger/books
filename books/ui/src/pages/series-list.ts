@@ -272,7 +272,7 @@ export function renderSeriesGrid(
     if (!showHeaders) {
         // Single flat grid in caller-chosen order. Series first, then
         // standalones — matches the natural visual hierarchy.
-        html += '<div class="row g-3 mb-4">';
+        html += '<div class="book-grid mb-4">';
         for (const s of series) html += renderSeriesCard(s);
         for (const b of standalones) html += renderStandaloneCard(b);
         html += '</div>';
@@ -299,7 +299,7 @@ export function renderSeriesGrid(
             const bookItems = standaloneBuckets[cat] || [];
             if (seriesItems.length === 0 && bookItems.length === 0) continue;
             html += `<h3 class="series-category-heading">${cat}</h3>`;
-            html += '<div class="row g-3 mb-4">';
+            html += '<div class="book-grid mb-4">';
             for (const s of seriesItems) html += renderSeriesCard(s);
             for (const b of bookItems) html += renderStandaloneCard(b);
             html += '</div>';
@@ -452,21 +452,19 @@ export function renderSeriesCard(s: any): string {
     );
 
     return `
-        <div class="col-6 col-sm-6 col-md-4 col-lg-3">
-            <div class="series-card${completionClass}${monitoredClass}${ongoingClass}${tierClass}"
-                 data-series-id="${s.series_link_id}">
-                <div class="cover-container">
-                    ${coverInner}
-                    ${tierCrown}
-                </div>
-                <div class="card-body">
-                    ${stampHtml}
-                    <h6 class="card-title">${escapeHtml(s.series)}</h6>
-                    ${authorHtml}
-                    ${segmentsHtml}
-                    ${notOwnedLine}
-                    ${inlineControls}
-                </div>
+        <div class="series-card${completionClass}${monitoredClass}${ongoingClass}${tierClass}"
+             data-series-id="${s.series_link_id}">
+            <div class="cover-container">
+                ${coverInner}
+                ${tierCrown}
+            </div>
+            <div class="card-body">
+                ${stampHtml}
+                <h6 class="card-title">${escapeHtml(s.series)}</h6>
+                ${authorHtml}
+                ${segmentsHtml}
+                ${notOwnedLine}
+                ${inlineControls}
             </div>
         </div>
     `;

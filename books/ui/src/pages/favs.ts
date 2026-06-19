@@ -79,7 +79,7 @@ export async function renderFavs(): Promise<void> {
         let seriesRow = '';
         if (favSeries.length) {
             seriesRow += `<h3 class="favs-category-heading">Favorite Series<span class="text-muted small ms-2">${favSeries.length}</span></h3>`;
-            seriesRow += '<div class="row g-3 mb-4">';
+            seriesRow += '<div class="book-grid mb-4">';
             for (const s of favSeries) seriesRow += renderSeriesCard(s);
             seriesRow += '</div>';
         }
