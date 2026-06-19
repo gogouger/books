@@ -90,11 +90,13 @@ export function bookCardHtml(book: any): string {
                 ${stampHtml}
                 <div class="card-title">${escapeHtml(book.title)}</div>
                 <div class="card-author">${authorsHtml(book.authors)}</div>
-                ${statusBadge}
-                <div class="card-meta-row">
-                    <div class="card-stars" data-rating="${rating}">${stars}</div>
-                    <button class="card-heart${favOn}" data-action="heart"
-                            type="button" aria-label="Favourite">♥</button>
+                <div class="card-bottom">
+                    ${statusBadge}
+                    <div class="card-meta-row">
+                        <div class="card-stars" data-rating="${rating}">${stars}</div>
+                        <button class="card-heart${favOn}" data-action="heart"
+                                type="button" aria-label="Favourite">♥</button>
+                    </div>
                 </div>
             </div>
         </div>

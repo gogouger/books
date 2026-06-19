@@ -211,15 +211,20 @@ body::before {
     text-overflow: ellipsis;
 }
 
-/* Inline meta row: stars + heart above a hairline divider. `margin-top:
-   auto` pushes the row to the bottom of the card body so it lines up
-   across every card in a row, regardless of how many lines the title
-   or author take. */
+/* Bottom block: status badge + meta row, anchored to the bottom of the
+   card body so the READ/READING/DON'T OWN badges AND the stars all line
+   up across every card in a row. The badge sits immediately above the
+   hairline divider that introduces the stars+heart strip. */
+.card-bottom {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
 .card-meta-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-top: auto;
     padding-top: 0.4rem;
     border-top: 1px solid var(--line);
 }
