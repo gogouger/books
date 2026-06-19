@@ -197,19 +197,27 @@ async def auto_price_user(user_id: int) -> dict:
     results: list[tuple[int, float, str]] = []
 
     async def process(client: httpx.AsyncClient, book: dict) -> None:
+        """Google Books primarily sells ebooks — its listPrice on a
+        salable volume is the ebook price. For physical and audiobook
+        rows, the ebook price would be wrong (audiobooks cost ~2x,
+        hardcovers cost ~1.5x), so we skip the API call entirely and
+        go straight to format defaults. The fallback is honest about
+        not knowing the real new-book retail."""
         nonlocal rate_limited
         price: float | None = None
-        async with sem:
-            if not rate_limited:
-                try:
-                    price = await _google_books_price(
-                        client,
-                        book.get("title") or "",
-                        book.get("isbn") or "",
-                    )
-                except httpx.HTTPError:
-                    rate_limited = True
-                await asyncio.sleep(delay)
+        fmt = (book.get("book_format") or "").lower()
+        if fmt == "ebook":
+            async with sem:
+                if not rate_limited:
+                    try:
+                        price = await _google_books_price(
+                            client,
+                            book.get("title") or "",
+                            book.get("isbn") or "",
+                        )
+                    except httpx.HTTPError:
+                        rate_limited = True
+                    await asyncio.sleep(delay)
         if price is not None:
             results.append((book["id"], price, "google"))
         else:
