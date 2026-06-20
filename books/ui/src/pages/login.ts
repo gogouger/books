@@ -32,7 +32,9 @@ export function updateNavbar(): void {
     const navSignin = document.getElementById('nav-signin')!;
     const navMyLibrary = document.getElementById('nav-my-library')!;
     const navAddItem = document.getElementById('nav-add-item')!;
-    const navScanItem = document.getElementById('nav-scan-item')!;
+    // Scan was removed from the nav (collapsed into the Add Book page CTA).
+    // Tolerate either DOM shape so any stale cached index.html still works.
+    const navScanItem = document.getElementById('nav-scan-item');
     const navRecsItem = document.getElementById('nav-recs-item')!;
     const navMetricsItem = document.getElementById('nav-metrics-item')!;
 
@@ -40,7 +42,7 @@ export function updateNavbar(): void {
     navLinks.style.display = 'none';
     navUser.style.display = 'none';
     navAddItem.style.display = 'none';
-    navScanItem.style.display = 'none';
+    if (navScanItem) navScanItem.style.display = 'none';
     navRecsItem.style.display = 'none';
     navMetricsItem.style.display = 'none';
     navUsername.textContent = '';
@@ -86,7 +88,7 @@ export function updateNavbar(): void {
     if (isOwner) {
         // Owner or superuser: full controls
         navAddItem.style.display = '';
-        navScanItem.style.display = '';
+        if (navScanItem) navScanItem.style.display = '';
         navRecsItem.style.display = '';
         navMetricsItem.style.display = '';
         navUsername.textContent = user.display_name;

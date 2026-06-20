@@ -2324,3 +2324,30 @@ body::before {
     font-size: 0.78rem;
     font-variant-numeric: tabular-nums;
 }
+
+.add-book-scan-cta {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    border: 1px solid var(--accent);
+    background: var(--panel-bg);
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+.add-book-scan-cta:hover {
+    background: rgba(46, 125, 110, 0.06);
+    color: inherit;
+    transform: translateY(-1px);
+}
+.add-book-scan-cta h6 { color: var(--accent); }
+.add-book-scan-cta__icon {
+    font-size: 1.8rem;
+    line-height: 1;
+    color: var(--accent);
+    font-weight: 500;
+}
+.add-book-scan-cta__chevron {
+    font-size: 1.6rem;
+    line-height: 1;
+    color: var(--accent);
+    opacity: 0.6;
+}

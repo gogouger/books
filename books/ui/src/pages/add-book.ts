@@ -27,6 +27,19 @@ export function renderAddBook(
         <div style="max-width: 700px; margin: 0 auto;">
             <h4 class="mb-3">Add Book</h4>
 
+            <a href="#/scan" class="card mb-3 add-book-scan-cta">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <span class="add-book-scan-cta__icon">⌗</span>
+                    <div class="flex-grow-1">
+                        <h6 class="mb-1">Scan a barcode</h6>
+                        <p class="text-muted small mb-0">
+                            Fastest way to add a physical book — point your phone at the ISBN on the back cover.
+                        </p>
+                    </div>
+                    <span class="add-book-scan-cta__chevron">›</span>
+                </div>
+            </a>
+
             <div class="card mb-3">
                 <div class="card-body">
                     <h6>Upload EPUB</h6>
