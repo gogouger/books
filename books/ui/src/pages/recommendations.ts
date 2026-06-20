@@ -2,6 +2,13 @@ import { api } from '../api';
 import { getLibraryUsername } from '../context';
 import { getUser } from '../auth';
 import { navigate } from '../router';
+import {
+    bookStarsHtml,
+    ratingFromClick,
+    setStarsFill,
+    previewHover,
+    clearHover,
+} from '../components/star-helpers';
 
 // One unified Rec shape regardless of which row it came from. For
 // `next_in_series` we get book_id (it's in the library); for the
@@ -206,11 +213,7 @@ function recCardHtml(rec: Rec): string {
         ? `<div class="rec-not-owned">Don’t own yet</div>`
         : '';
 
-    const stars = Array.from({ length: 5 }, (_, i) => {
-        const v = i + 1;
-        const cls = v <= rating ? 'rec-star filled' : 'rec-star';
-        return `<button class="${cls}" data-action="rate" data-val="${v}">★</button>`;
-    }).join('');
+    const stars = bookStarsHtml(rating, { cls: 'rec-star' });
 
     const heartCls = rec.is_favorite ? 'rec-icon-btn heart-on' : 'rec-icon-btn';
     const heart = `<button class="${heartCls}" data-action="heart" title="Favourite">♥</button>`;
@@ -252,17 +255,19 @@ function stampLabel(rec: Rec): string {
 function wireCards(app: HTMLElement, username: string): void {
     let hoverGroup: HTMLElement | null = null;
 
-    // Star hover preview — light up stars up to the hovered index.
-    app.addEventListener('mouseover', (ev) => {
+    // Star hover preview — light up stars up to the hovered position
+    // (half- or full-fill on the hovered star based on cursor X).
+    app.addEventListener('mousemove', (ev) => {
         const star = (ev.target as HTMLElement).closest<HTMLElement>('.rec-star');
         if (!star) return;
-        const group = star.parentElement;
+        const group = star.parentElement as HTMLElement | null;
         if (!group) return;
         hoverGroup = group;
-        const v = parseInt(star.getAttribute('data-val') || '0', 10);
-        group.querySelectorAll<HTMLElement>('.rec-star').forEach((s, i) => {
-            s.classList.toggle('hovered', i < v);
-        });
+        previewHover(
+            group.querySelectorAll<HTMLElement>('.rec-star'),
+            star,
+            (ev as MouseEvent).clientX,
+        );
     });
     app.addEventListener('mouseout', (ev) => {
         const star = (ev.target as HTMLElement).closest<HTMLElement>('.rec-star');
@@ -271,8 +276,7 @@ function wireCards(app: HTMLElement, username: string): void {
         setTimeout(() => {
             if (!hoverGroup) return;
             if (!hoverGroup.matches(':hover')) {
-                hoverGroup.querySelectorAll<HTMLElement>('.rec-star')
-                    .forEach(s => s.classList.remove('hovered'));
+                clearHover(hoverGroup.querySelectorAll<HTMLElement>('.rec-star'));
                 hoverGroup = null;
             }
         }, 0);
@@ -293,11 +297,11 @@ function wireCards(app: HTMLElement, username: string): void {
         }
 
         if (action === 'rate') {
-            const v = parseInt(
-                (target.closest<HTMLElement>('[data-val]')?.dataset.val) || '0', 10,
-            );
-            if (!v) return;
-            await handleRate(card, username, v);
+            const star = target.closest<HTMLElement>('.rec-star');
+            const v = parseInt(star?.dataset.val || '0', 10);
+            if (!v || !star) return;
+            const rating = ratingFromClick(star, ev.clientX, v);
+            await handleRate(card, username, rating);
             return;
         }
         if (action === 'heart') {
@@ -403,10 +407,8 @@ async function handleDismiss(card: HTMLElement, username: string): Promise<void>
 function setRatingUI(card: HTMLElement, value: number): void {
     card.dataset.rating = String(value);
     const stars = card.querySelectorAll<HTMLElement>('.rec-star');
-    stars.forEach((s, i) => {
-        s.classList.toggle('filled', i < value);
-        s.classList.remove('hovered');
-    });
+    setStarsFill(stars, value);
+    clearHover(stars);
 }
 
 function setFavUI(card: HTMLElement, on: boolean): void {

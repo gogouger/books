@@ -235,21 +235,37 @@ body::before {
     margin-top: 0.2rem;
 }
 .card-stars { display: flex; gap: 0; }
+/* Stars use background-clip:text so a single button can render a half-
+   star by gradient-stopping at 50%. --fill-pct is driven by data-fill /
+   data-hover-fill; the gradient bakes the muted/active colors into the
+   glyph itself, no overlay DOM. */
 .card-star {
+    --fill-pct: 0%;
+    --star-on: #c8893b;
+    --star-off: var(--muted);
     background: transparent;
     border: none;
     padding: 3px 2px;
     cursor: pointer;
-    color: var(--muted);
-    font-size: 1rem;
+    font-size: 1.4rem;
     line-height: 1;
-    transition: color 0.1s ease, transform 0.1s ease;
+    color: var(--star-off);
+    background-image: linear-gradient(
+        90deg,
+        var(--star-on) var(--fill-pct),
+        var(--star-off) var(--fill-pct)
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    transition: transform 0.1s ease;
 }
 .card-star:hover { transform: scale(1.15); }
-.card-star.hovered,
-.card-star.filled { color: #c8893b; }
-[data-bs-theme=dark] .card-star.hovered,
-[data-bs-theme=dark] .card-star.filled { color: #e4a23a; }
+.card-star[data-fill="half"]       { --fill-pct: 50%; }
+.card-star[data-fill="full"]       { --fill-pct: 100%; }
+.card-star[data-hover-fill="half"] { --fill-pct: 50%; }
+.card-star[data-hover-fill="full"] { --fill-pct: 100%; }
+[data-bs-theme=dark] .card-star { --star-on: #e4a23a; }
 
 .card-heart {
     background: transparent;
@@ -478,30 +494,43 @@ body::before {
 .book-card.ghost-card .card-stamp { color: var(--muted); }
 .book-card.ghost-card .card-stamp::after { background: var(--muted); }
 
-/* Rating stars */
+/* Rating stars on the book-edit page. Uses the same background-clip:text
+   half-star treatment as the inline card stars, but inherits the
+   .rating-stars__btn class. */
 .rating-stars {
     display: inline-flex;
     gap: 2px;
-    font-size: 0.9rem;
+    font-size: 1.6rem;
+    line-height: 1;
 }
-
-.rating-stars .star {
-    color: var(--bs-border-color);
+.rating-stars__btn {
+    --fill-pct: 0%;
+    --star-on: #c8893b;
+    --star-off: var(--muted);
+    background: transparent;
+    border: 0;
+    padding: 2px 1px;
     cursor: default;
+    font-size: inherit;
+    line-height: 1;
+    color: var(--star-off);
+    background-image: linear-gradient(
+        90deg,
+        var(--star-on) var(--fill-pct),
+        var(--star-off) var(--fill-pct)
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    transition: transform 0.1s ease;
 }
-
-.rating-stars .star.filled {
-    color: #ffc107;
-}
-
-.rating-stars.editable .star {
-    cursor: pointer;
-    transition: color 0.1s;
-}
-
-.rating-stars.editable .star:hover {
-    color: #ffca2c;
-}
+.rating-stars.editable .rating-stars__btn { cursor: pointer; }
+.rating-stars.editable .rating-stars__btn:hover { transform: scale(1.1); }
+.rating-stars__btn[data-fill="half"]       { --fill-pct: 50%; }
+.rating-stars__btn[data-fill="full"]       { --fill-pct: 100%; }
+.rating-stars__btn[data-hover-fill="half"] { --fill-pct: 50%; }
+.rating-stars__btn[data-hover-fill="full"] { --fill-pct: 100%; }
+[data-bs-theme=dark] .rating-stars__btn { --star-on: #e4a23a; }
 
 /* Favorite button */
 .favorite-btn {
@@ -868,20 +897,35 @@ body::before {
     gap: 0;
     line-height: 1;
 }
+/* Same background-clip:text fill trick as .card-star, for consistency
+   across book + series surfaces. */
 .series-card-star {
+    --fill-pct: 0%;
+    --star-on: #c8893b;
+    --star-off: var(--muted);
     background: transparent;
     border: 0;
     padding: 3px 2px;
-    color: var(--muted);
-    font-size: 1rem;
     cursor: pointer;
-    transition: color 0.1s ease, transform 0.1s ease;
+    font-size: 1.4rem;
+    line-height: 1;
+    color: var(--star-off);
+    background-image: linear-gradient(
+        90deg,
+        var(--star-on) var(--fill-pct),
+        var(--star-off) var(--fill-pct)
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    transition: transform 0.1s ease;
 }
 .series-card-star:hover { transform: scale(1.15); }
-.series-card-star.filled,
-.series-card-star.hovered { color: #c8893b; }
-[data-bs-theme=dark] .series-card-star.filled,
-[data-bs-theme=dark] .series-card-star.hovered { color: #e4a23a; }
+.series-card-star[data-fill="half"]       { --fill-pct: 50%; }
+.series-card-star[data-fill="full"]       { --fill-pct: 100%; }
+.series-card-star[data-hover-fill="half"] { --fill-pct: 50%; }
+.series-card-star[data-hover-fill="full"] { --fill-pct: 100%; }
+[data-bs-theme=dark] .series-card-star { --star-on: #e4a23a; }
 
 .series-card-btn {
     background: transparent;
@@ -1872,20 +1916,32 @@ body::before {
 }
 .rec-stars { display: flex; gap: 1px; }
 .rec-star {
+    --fill-pct: 0%;
+    --star-on: #c8893b;
+    --star-off: var(--muted);
     background: transparent;
     border: none;
     padding: 2px 1px;
     cursor: pointer;
-    color: var(--line2);
-    font-size: 0.82rem;
+    font-size: 1.2rem;
     line-height: 1;
-    transition: color 0.1s ease, transform 0.1s ease;
+    color: var(--star-off);
+    background-image: linear-gradient(
+        90deg,
+        var(--star-on) var(--fill-pct),
+        var(--star-off) var(--fill-pct)
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    transition: transform 0.1s ease;
 }
 .rec-star:hover { transform: scale(1.12); }
-.rec-star.hovered,
-.rec-star.filled { color: #c8893b; }
-[data-bs-theme=dark] .rec-star.hovered,
-[data-bs-theme=dark] .rec-star.filled { color: #e4a23a; }
+.rec-star[data-fill="half"]       { --fill-pct: 50%; }
+.rec-star[data-fill="full"]       { --fill-pct: 100%; }
+.rec-star[data-hover-fill="half"] { --fill-pct: 50%; }
+.rec-star[data-hover-fill="full"] { --fill-pct: 100%; }
+[data-bs-theme=dark] .rec-star { --star-on: #e4a23a; }
 
 .rec-right { display: flex; gap: 0; align-items: center; }
 .rec-icon-btn {

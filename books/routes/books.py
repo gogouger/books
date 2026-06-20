@@ -54,7 +54,7 @@ class BookUpdate(BaseModel):
     goodreads_id: str | None = None
     tags: list[str] | None = None
     date_finished: str | None = None
-    rating: int | None = None
+    rating: float | None = None
     reading_status: str | None = None
     progress: float | None = None
     is_favorite: bool | None = None
@@ -1117,7 +1117,7 @@ class BookFromPreview(BaseModel):
     format: str | None = None
     is_owned: int | None = None
     reading_status: str | None = None
-    rating: int | None = None
+    rating: float | None = None
     date_finished: str | None = None
 
 

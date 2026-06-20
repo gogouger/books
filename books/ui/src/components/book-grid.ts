@@ -3,6 +3,12 @@ import { navigate } from '../router';
 import { api } from '../api';
 import { getLibraryUsername } from '../context';
 import { renderInlineSeriesControls } from '../pages/series-list';
+import {
+    ratingFromClick,
+    setStarsFill,
+    previewHover,
+    clearHover,
+} from './star-helpers';
 
 export interface BookGridOptions {
     grouped?: boolean;  // emit per-series section headers
@@ -260,16 +266,14 @@ function wireInlineRatings(container: HTMLElement): void {
 
     let hoverGroup: HTMLElement | null = null;
 
-    container.addEventListener('mouseover', (ev) => {
+    container.addEventListener('mousemove', (ev) => {
         const star = (ev.target as HTMLElement).closest<HTMLElement>('.card-star');
         if (!star) return;
         const group = star.parentElement as HTMLElement | null;
         if (!group) return;
         hoverGroup = group;
-        const v = parseInt(star.dataset.val || '0', 10);
-        group.querySelectorAll<HTMLElement>('.card-star').forEach((s, i) => {
-            s.classList.toggle('hovered', i < v);
-        });
+        const stars = group.querySelectorAll<HTMLElement>('.card-star');
+        previewHover(stars, star, ev.clientX);
     });
     container.addEventListener('mouseout', (ev) => {
         const star = (ev.target as HTMLElement).closest<HTMLElement>('.card-star');
@@ -277,8 +281,7 @@ function wireInlineRatings(container: HTMLElement): void {
         setTimeout(() => {
             if (!hoverGroup) return;
             if (!hoverGroup.matches(':hover')) {
-                hoverGroup.querySelectorAll<HTMLElement>('.card-star')
-                    .forEach(s => s.classList.remove('hovered'));
+                clearHover(hoverGroup.querySelectorAll<HTMLElement>('.card-star'));
                 hoverGroup = null;
             }
         }, 0);
@@ -303,11 +306,12 @@ function wireInlineRatings(container: HTMLElement): void {
             if (star) {
                 const v = parseInt(star.dataset.val || '0', 10);
                 if (!v) return;
+                const rating = ratingFromClick(star, ev.clientX, v);
                 await api.updateBook(username, bookId, {
-                    rating: v,
+                    rating,
                     reading_status: 'read',
                 });
-                setCardRating(card, v);
+                setCardRating(card, rating);
             } else if (heart) {
                 const next = card.dataset.favorite !== '1';
                 await api.updateBook(username, bookId, {
@@ -323,10 +327,9 @@ function wireInlineRatings(container: HTMLElement): void {
 
 function setCardRating(card: HTMLElement, value: number): void {
     card.dataset.rating = String(value);
-    card.querySelectorAll<HTMLElement>('.card-star').forEach((s, i) => {
-        s.classList.toggle('filled', i < value);
-        s.classList.remove('hovered');
-    });
+    const stars = card.querySelectorAll<HTMLElement>('.card-star');
+    setStarsFill(stars, value);
+    clearHover(stars);
     // Flip the bottom-of-cover accent to read-green since rating implies read.
     const status = card.querySelector<HTMLElement>('.cover-status');
     if (status) {
@@ -369,11 +372,12 @@ function wireSeriesHeadingControls(container: HTMLElement): void {
 
         let patch: Record<string, any> = {};
         if (action === 'rate') {
-            const next = parseInt(btn.dataset.rate || '0', 10);
-            const group = btn.parentElement!;
-            const current = group.querySelectorAll<HTMLElement>(
-                '.series-card-star.filled'
-            ).length;
+            const v = parseInt(btn.dataset.rate || '0', 10);
+            const next = ratingFromClick(btn, ev.clientX, v);
+            // Click the current rating to clear it.
+            const currentAttr = btn.closest<HTMLElement>('.series-card-controls')
+                ?.dataset.rating;
+            const current = currentAttr ? Number(currentAttr) : 0;
             patch = { rating: next === current ? null : next };
         } else if (action === 'heart') {
             patch = { is_favorite: !btn.classList.contains('is-on') };
@@ -401,9 +405,11 @@ function wireSeriesHeadingControls(container: HTMLElement): void {
             const row = btn.closest<HTMLElement>('.series-card-controls')!;
             if (action === 'rate') {
                 const next = patch.rating ?? 0;
-                row.querySelectorAll<HTMLElement>('.series-card-star').forEach((s, i) => {
-                    s.classList.toggle('filled', i < next);
-                });
+                row.dataset.rating = String(next);
+                setStarsFill(
+                    row.querySelectorAll<HTMLElement>('.series-card-star'),
+                    next,
+                );
             } else if (action === 'heart') {
                 btn.classList.toggle('is-on', !!patch.is_favorite);
             } else {

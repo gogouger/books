@@ -1,15 +1,28 @@
+// Editable star rating used on the book-edit page. Renders the same
+// background-clip:text half-star treatment as the inline card stars,
+// but with a dedicated class + a clear-on-click affordance.
+import {
+    ratingFromClick,
+    setStarsFill,
+    previewHover,
+    clearHover,
+} from './star-helpers';
+
+function fillFor(rating: number, star: number): string {
+    if (rating >= star) return 'full';
+    if (rating >= star - 0.5) return 'half';
+    return '';
+}
+
 export function ratingStarsHtml(
     rating: number | null,
-    editable: boolean = false
+    editable: boolean = false,
 ): string {
-    const r = rating || 0;
+    const r = Number(rating) || 0;
     let html = `<div class="rating-stars${editable ? ' editable' : ''}" data-rating="${r}">`;
-    for (let i = 1; i <= 5; i++) {
-        if (r >= i) {
-            html += `<i class="bi bi-star-fill star filled" data-value="${i}"></i>`;
-        } else {
-            html += `<i class="bi bi-star star" data-value="${i}"></i>`;
-        }
+    for (let v = 1; v <= 5; v++) {
+        const f = fillFor(r, v);
+        html += `<button type="button" class="rating-stars__btn" data-val="${v}" data-fill="${f}"${editable ? '' : ' disabled'}>★</button>`;
     }
     html += '</div>';
     return html;
@@ -17,39 +30,41 @@ export function ratingStarsHtml(
 
 export function attachRatingHandler(
     container: HTMLElement,
-    callback: (rating: number) => void
+    callback: (rating: number) => void,
 ): void {
-    const starsDiv = container.querySelector('.rating-stars.editable');
+    const starsDiv = container.querySelector<HTMLElement>('.rating-stars.editable');
     if (!starsDiv) return;
+    const stars = () => starsDiv.querySelectorAll<HTMLElement>('.rating-stars__btn');
+
+    starsDiv.addEventListener('mousemove', (e) => {
+        const btn = (e.target as HTMLElement).closest<HTMLElement>('.rating-stars__btn');
+        if (!btn) return;
+        previewHover(stars(), btn, e.clientX);
+    });
+    starsDiv.addEventListener('mouseleave', () => {
+        clearHover(stars());
+    });
 
     starsDiv.addEventListener('click', (e) => {
-        const target = e.target as HTMLElement;
-        if (!target.classList.contains('star')) return;
+        const btn = (e.target as HTMLElement).closest<HTMLElement>('.rating-stars__btn');
+        if (!btn) return;
+        const v = parseInt(btn.dataset.val || '0', 10);
+        if (!v) return;
+        const rating = ratingFromClick(btn, e.clientX, v);
+        const current = Number(starsDiv.dataset.rating || '0');
+        // Click the current rating to clear it.
+        const newRating = rating === current ? 0 : rating;
 
-        const value = parseInt(target.dataset.value || '0');
-        const currentRating = parseInt(
-            starsDiv.getAttribute('data-rating') || '0'
-        );
-
-        // Click same star = clear to 0
-        const newRating = value === currentRating ? 0 : value;
-
-        starsDiv.setAttribute('data-rating', String(newRating));
-        starsDiv.innerHTML = '';
-        const temp = document.createElement('div');
-        temp.innerHTML = ratingStarsHtml(newRating, true);
-        const newStars = temp.querySelector('.rating-stars');
-        if (newStars) {
-            starsDiv.innerHTML = newStars.innerHTML;
-        }
-
+        starsDiv.dataset.rating = String(newRating);
+        setStarsFill(stars(), newRating);
+        clearHover(stars());
         callback(newRating);
     });
 }
 
 export function favoriteButtonHtml(
     isFavorite: boolean,
-    editable: boolean
+    editable: boolean,
 ): string {
     const icon = isFavorite ? 'bi-heart-fill' : 'bi-heart';
     const activeClass = isFavorite ? ' active' : '';
@@ -61,7 +76,7 @@ export function favoriteButtonHtml(
 
 export function attachFavoriteHandler(
     container: HTMLElement,
-    callback: (isFavorite: boolean) => void
+    callback: (isFavorite: boolean) => void,
 ): void {
     const btn = container.querySelector('.favorite-btn.editable');
     if (!btn) return;

@@ -1,4 +1,5 @@
 import { api } from '../api';
+import { bookStarsHtml } from './star-helpers';
 
 // Minimalist book card. Same visual vocabulary as the /recommendations
 // cards: no card chrome, cover is the box, type carries the rest. Stars
@@ -67,11 +68,7 @@ export function bookCardHtml(book: any): string {
 
     const rating = Number(book.rating) || 0;
     const favOn = book.is_favorite ? ' on' : '';
-    const stars = Array.from({ length: 5 }, (_, i) => {
-        const v = i + 1;
-        const cls = v <= rating ? 'card-star filled' : 'card-star';
-        return `<button class="${cls}" data-action="rate" data-val="${v}" type="button">★</button>`;
-    }).join('');
+    const stars = bookStarsHtml(rating);
 
     return `
         <div class="book-card${ownedClass}${allTimeClass}"

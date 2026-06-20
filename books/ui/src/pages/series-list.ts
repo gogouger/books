@@ -4,6 +4,10 @@ import { navigate, navigateHome } from '../router';
 import { setAuthorFilter } from './library';
 import { formatBadgesHtml } from '../components/book-card';
 import {
+    seriesStarsHtml,
+    ratingFromClick,
+} from '../components/star-helpers';
+import {
     filterBarHtml,
     attachFilterHandlers,
     FilterState,
@@ -358,12 +362,12 @@ export function attachSeriesGridHandlers(container: HTMLElement): void {
             const card = target.closest<HTMLElement>('.series-card');
             let patch: Record<string, any> = {};
             if (action === 'rate') {
-                const next = parseInt(target.dataset.rate || '0', 10);
+                const v = parseInt(target.dataset.rate || '0', 10);
+                const next = ratingFromClick(target, e.clientX, v);
                 // Click the current rating to clear it.
-                const stars = group.querySelectorAll<HTMLElement>(
-                    '.series-card-star.filled'
-                );
-                const current = stars.length;
+                const currentAttr = target.closest<HTMLElement>('.series-card-controls')
+                    ?.dataset.rating;
+                const current = currentAttr ? Number(currentAttr) : 0;
                 patch = { rating: next === current ? null : next };
             } else if (action === 'heart') {
                 const on = target.classList.contains('is-on');
@@ -496,12 +500,7 @@ export function renderInlineSeriesControls(
     // Unicode glyphs (★ ♥ ✦ etc.) instead of Bootstrap Icons so the
     // controls always render even if the bi-icons font fails to load.
     // Same pattern as book-card + rec-card.
-    const stars: string[] = [];
-    for (let i = 1; i <= 5; i++) {
-        const filled = i <= rating;
-        const cls = filled ? 'series-card-star filled' : 'series-card-star';
-        stars.push(`<button type="button" class="${cls}" data-action="rate" data-rate="${i}" data-series-id="${seriesId}" title="${i} star${i !== 1 ? 's' : ''}">★</button>`);
-    }
+    const stars = seriesStarsHtml(rating, seriesId);
     // Tier buttons (1/2/3 for gold/silver/bronze) used to live here too,
     // but the inline strip is most useful as a quick-rate affordance —
     // tier is a power-user choice handled on the series detail page.
@@ -511,8 +510,8 @@ export function renderInlineSeriesControls(
         ? 'series-card-btn series-card-btn--heart is-on'
         : 'series-card-btn series-card-btn--heart';
     return `
-        <div class="series-card-controls" data-series-id="${seriesId}">
-            <span class="series-card-stars">${stars.join('')}</span>
+        <div class="series-card-controls" data-series-id="${seriesId}" data-rating="${rating || 0}">
+            <span class="series-card-stars">${stars}</span>
             <button type="button" class="${heartCls}" data-action="heart" data-series-id="${seriesId}" title="Like series">♥</button>
         </div>
     `;

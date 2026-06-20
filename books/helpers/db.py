@@ -1939,7 +1939,7 @@ def insert_book(
     tags: list[str] | None,
     date_added: str,
     date_finished: str | None,
-    rating: int | None,
+    rating: float | None,
     reading_status: str = "unread",
     progress: float | None = None,
     is_favorite: int = 0,
