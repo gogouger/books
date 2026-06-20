@@ -470,10 +470,10 @@ export function renderSeriesCard(s: any): string {
             <div class="card-body">
                 ${stampHtml}
                 <h6 class="card-title">${escapeHtml(s.series)}</h6>
+                ${inlineControls}
                 ${authorHtml}
                 ${segmentsHtml}
                 ${notOwnedLine}
-                ${inlineControls}
             </div>
         </div>
     `;

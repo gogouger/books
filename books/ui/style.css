@@ -848,17 +848,19 @@ body::before {
 }
 
 /* Rate/heart/tier controls inline on every series-list card. They sit
-   on a hairline divider above the bottom of the card with a contrasting
-   chip background so they're actually discoverable. */
+   immediately under the title — most discoverable spot on the card,
+   tied to what they're rating. Subtle sea-green tinted background so
+   they read as a deliberate action row rather than dead space. */
 .series-card-controls {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-top: auto;
-    padding: 0.45rem 0.3rem 0.35rem;
+    padding: 0.4rem 0.3rem;
+    margin: 0.25rem 0 0.4rem;
     border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
     background: color-mix(in srgb, var(--accent) 4%, var(--panel-bg));
-    border-radius: 0 0 4px 4px;
+    border-radius: 4px;
     flex-wrap: nowrap;
 }
 .series-card-stars {
