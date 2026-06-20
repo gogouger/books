@@ -492,11 +492,14 @@ function renderInlineSeriesControls(
     isSecond: boolean,
     isThird: boolean,
 ): string {
+    // Unicode glyphs (★ ♥ ✦ etc.) instead of Bootstrap Icons so the
+    // controls always render even if the bi-icons font fails to load.
+    // Same pattern as book-card + rec-card.
     const stars: string[] = [];
     for (let i = 1; i <= 5; i++) {
         const filled = i <= rating;
         const cls = filled ? 'series-card-star filled' : 'series-card-star';
-        stars.push(`<button type="button" class="${cls}" data-action="rate" data-rate="${i}" data-series-id="${seriesId}" title="${i} star${i !== 1 ? 's' : ''}"><i class="bi ${filled ? 'bi-star-fill' : 'bi-star'}"></i></button>`);
+        stars.push(`<button type="button" class="${cls}" data-action="rate" data-rate="${i}" data-series-id="${seriesId}" title="${i} star${i !== 1 ? 's' : ''}">★</button>`);
     }
     const heartCls = isFavorite
         ? 'series-card-btn series-card-btn--heart is-on'
@@ -513,18 +516,10 @@ function renderInlineSeriesControls(
     return `
         <div class="series-card-controls" data-series-id="${seriesId}">
             <span class="series-card-stars">${stars.join('')}</span>
-            <button type="button" class="${heartCls}" data-action="heart" data-series-id="${seriesId}" title="Like series">
-                <i class="bi ${isFavorite ? 'bi-heart-fill' : 'bi-heart'}"></i>
-            </button>
-            <button type="button" class="${bronzeCls}" data-action="bronze" data-series-id="${seriesId}" title="Bronze — #3 all-time">
-                <i class="bi bi-award"></i>
-            </button>
-            <button type="button" class="${silverCls}" data-action="silver" data-series-id="${seriesId}" title="Silver — #2 all-time">
-                <i class="bi bi-crown"></i>
-            </button>
-            <button type="button" class="${goldCls}" data-action="gold" data-series-id="${seriesId}" title="Gold — #1 all-time">
-                <i class="bi bi-crown-fill"></i>
-            </button>
+            <button type="button" class="${heartCls}" data-action="heart" data-series-id="${seriesId}" title="Like series">♥</button>
+            <button type="button" class="${bronzeCls}" data-action="bronze" data-series-id="${seriesId}" title="Bronze — #3 all-time">3</button>
+            <button type="button" class="${silverCls}" data-action="silver" data-series-id="${seriesId}" title="Silver — #2 all-time">2</button>
+            <button type="button" class="${goldCls}" data-action="gold" data-series-id="${seriesId}" title="Gold — #1 all-time">1</button>
         </div>
     `;
 }
