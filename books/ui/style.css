@@ -1267,7 +1267,13 @@ body::before {
 .segment-read { background-color: #198754; border-color: #198754; }
 .segment-reading { background-color: #c8893b; border-color: #c8893b; }
 .segment-unread { background-color: var(--bs-border-color); border-color: var(--bs-border-color); }
-.segment-not-owned { border-color: #b56a47; }  /* family rust, not Bootstrap bright red */
+/* Not-owned: dashed muted border so it reads as "absence" alongside
+   .segment-ghost (same visual vocabulary as the ghost-cover treatment). */
+.segment-not-owned {
+    background-color: transparent;
+    border-style: dashed;
+    border-color: var(--line2);
+}
 /* Ghost slot: series entry not in the user's library. Hollow,
    dashed, no fill — visually distinct from a regular unread slot. */
 .segment-ghost {
@@ -1293,14 +1299,15 @@ body::before {
     opacity: 0.75;
 }
 
-/* Unread + not-owned: family rust border (not Bootstrap bright red) */
+/* Unread + not-owned: dashed muted left rule (matches .segment-not-owned
+   vocabulary). Keeps the row distinguishable without warning-color noise. */
 .series-book-not-owned-unread {
-    border-left: 8px solid #b56a47;
+    border-left: 4px dashed var(--line2);
 }
 
-/* Bootstrap's .text-danger / .bg-danger override — family rust for
-   "not owned / missing", not the alarming #dc3545. */
-.text-danger { color: #b56a47 !important; }
+/* "Not owned" count callout (e.g. "3 not owned" in series header). Muted
+   ink — it's a metadata note, not a warning. */
+.text-not-owned { color: var(--muted); }
 
 .series-card-complete {
     border-left: 4px solid #198754;
@@ -1641,10 +1648,15 @@ body::before {
 .card-status .bi { font-size: 0.78rem; line-height: 1; }
 .status-read       { background:#d6f0df; color:#0b5532; }
 .status-reading    { background:#dfe9ff; color:#1742a0; }
-.status-not-owned  { background:transparent; color:#8a5a1f; border:1px dashed #c0a37a; }
+/* Not-owned pill is theme-aligned absence: dashed muted border on paper,
+   no fill, muted ink. Matches the dashed ghost-cover treatment. */
+.status-not-owned  {
+    background: transparent;
+    color: var(--muted);
+    border: 1px dashed var(--line2);
+}
 [data-bs-theme=dark] .status-read       { background:#193a26; color:#7adfa1; }
 [data-bs-theme=dark] .status-reading    { background:#1b2748; color:#9fbcff; }
-[data-bs-theme=dark] .status-not-owned  { color:#d2a76b; border-color:#7a5a32; }
 
 /* --- /recommendations page ------------------------------------------- */
 /* Minimal/editorial: no card chrome, the cover *is* the box. Type carries

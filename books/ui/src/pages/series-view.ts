@@ -57,7 +57,7 @@ export async function renderSeriesView(
         const ghostCount = ghosts.length;
         const totalSlots = books.length + ghostCount;
         const notOwnedLabel = notOwnedCount > 0
-            ? ` &middot; <span class="text-danger">${notOwnedCount} not owned</span>`
+            ? ` &middot; <span class="text-not-owned">${notOwnedCount} not owned</span>`
             : '';
         const ghostLabel = ghostCount > 0
             ? ` &middot; <span class="text-muted">${ghostCount} not in library</span>`
