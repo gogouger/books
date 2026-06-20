@@ -2090,3 +2090,177 @@ body::before {
 }
 .metrics-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .metrics-table tbody tr:last-child td { border-bottom: 0; }
+
+/* --- /metrics new sections (records / by-year / authors / ratings) -- */
+
+.metric-records-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0.6rem;
+}
+.metric-record {
+    background: var(--panel-bg);
+    border-radius: 6px;
+    padding: 0.55rem 0.7rem;
+    box-shadow: 0 1px 0 var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+.metric-record-label {
+    font-size: 0.62rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+}
+.metric-record-title {
+    font-size: 0.85rem;
+    color: var(--ink);
+    text-decoration: none;
+    font-weight: 500;
+    line-height: 1.25;
+}
+.metric-record-title:hover { color: var(--accent); }
+.metric-record-meta {
+    font-size: 0.7rem;
+    color: var(--muted);
+    font-style: italic;
+}
+
+.metric-year-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+.metric-year-row {
+    display: grid;
+    grid-template-columns: 50px 1fr auto;
+    gap: 0.6rem;
+    align-items: center;
+    font-size: 0.78rem;
+}
+.metric-year-label {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+}
+.metric-year-bar-wrap {
+    position: relative;
+    height: 18px;
+    background: var(--muted-bg);
+    border-radius: 3px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+}
+.metric-year-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+.metric-year-n {
+    position: absolute;
+    right: 6px;
+    color: var(--ink);
+    font-size: 0.7rem;
+    font-weight: 500;
+}
+.metric-year-meta {
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-style: italic;
+    white-space: nowrap;
+}
+
+.metric-author-cols {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1.2rem;
+}
+.metric-author-h {
+    font-size: 0.66rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 0.4rem;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid var(--line);
+}
+.metric-author-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    counter-reset: alist;
+}
+.metric-author-list li {
+    counter-increment: alist;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 0.2rem 0;
+    font-size: 0.78rem;
+    border-bottom: 1px dashed transparent;
+}
+.metric-author-list li:not(:last-child) {
+    border-bottom-color: var(--line);
+}
+.metric-author-list li::before {
+    content: counter(alist) ".";
+    color: var(--muted);
+    margin-right: 0.4rem;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.7rem;
+}
+.metric-author-name {
+    color: var(--ink);
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-right: 0.4rem;
+}
+.metric-author-n {
+    color: var(--accent);
+    font-weight: 500;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.metric-rating-hist {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    max-width: 480px;
+}
+.metric-rating-row {
+    display: grid;
+    grid-template-columns: 70px 1fr 30px;
+    gap: 0.6rem;
+    align-items: center;
+}
+.metric-rating-stars {
+    color: #c8893b;
+    letter-spacing: -0.04em;
+    font-size: 0.9rem;
+}
+.metric-rating-bar-wrap {
+    height: 12px;
+    background: var(--muted-bg);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.metric-rating-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #c8893b, #d99860);
+    transition: width 0.3s ease;
+}
+.metric-rating-n {
+    text-align: right;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+}

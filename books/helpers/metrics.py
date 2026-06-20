@@ -6,7 +6,8 @@ a single SELECT. Returns a JSON-able dict consumed by the metrics page.
 
 import json
 import re
-from collections import Counter
+from collections import Counter, defaultdict
+from datetime import datetime, timezone
 
 from . import db
 
@@ -75,7 +76,8 @@ def compute_metrics(user_id: int) -> dict:
                book_format, also_physical,
                is_owned, reading_status, rating, is_favorite,
                is_all_time_fav, is_second_fav, is_third_fav,
-               price
+               price, pages, audio_seconds,
+               date_finished, date_added, published_date
         FROM books
         WHERE user_id = ?
         """,
@@ -254,6 +256,160 @@ def compute_metrics(user_id: int) -> dict:
         if not _parse_tags(b.get("tags"))
     )
 
+    # --- Lifetime + this-year totals + by-year breakdown ----------------
+    # Pages/audio totals only count READ books with the data field set —
+    # we don't extrapolate from estimates so the headline numbers stay
+    # honest. UI can show "x of y read books have a page count".
+    now = datetime.now(timezone.utc)
+    this_year = now.year
+
+    lifetime = {
+        "books_finished": 0,
+        "pages_read": 0,
+        "audio_seconds": 0,
+        "spend": 0.0,
+        "books_with_pages": 0,
+        "books_with_audio": 0,
+    }
+    yearly_buckets: dict[int, dict] = defaultdict(lambda: {
+        "year": 0, "finished": 0, "pages": 0, "audio_seconds": 0, "spend": 0.0,
+    })
+
+    for b in books:
+        if b["reading_status"] == "read":
+            year = _year_of(b.get("date_finished"))
+            lifetime["books_finished"] += 1
+            if b.get("pages"):
+                lifetime["pages_read"] += int(b["pages"])
+                lifetime["books_with_pages"] += 1
+            if b.get("audio_seconds"):
+                lifetime["audio_seconds"] += int(b["audio_seconds"])
+                lifetime["books_with_audio"] += 1
+            if year is not None:
+                bucket = yearly_buckets[year]
+                bucket["year"] = year
+                bucket["finished"] += 1
+                if b.get("pages"):
+                    bucket["pages"] += int(b["pages"])
+                if b.get("audio_seconds"):
+                    bucket["audio_seconds"] += int(b["audio_seconds"])
+
+        # Spend totals: bucket by date_added year (when you bought it),
+        # not date_finished (when you read it). 'Lifetime spend' equals
+        # the existing value.total above.
+        if b.get("price") is not None:
+            add_year = _year_of(b.get("date_added"))
+            if add_year is not None:
+                yearly_buckets[add_year]["year"] = add_year
+                yearly_buckets[add_year]["spend"] += float(b["price"])
+
+    lifetime["spend"] = total_value
+    lifetime_hours = round(lifetime["audio_seconds"] / 3600.0, 1)
+
+    by_year = sorted(yearly_buckets.values(), key=lambda x: x["year"])
+    for y in by_year:
+        y["spend"] = round(y["spend"], 2)
+        y["hours"] = round(y["audio_seconds"] / 3600.0, 1)
+
+    # This-year tile values
+    ty = yearly_buckets.get(this_year, {
+        "finished": 0, "pages": 0, "audio_seconds": 0, "spend": 0.0,
+    })
+    this_year_block = {
+        "year": this_year,
+        "finished": ty["finished"],
+        "pages": ty["pages"],
+        "hours": round(ty["audio_seconds"] / 3600.0, 1),
+        "spend": round(ty["spend"], 2),
+        "day_of_year": now.timetuple().tm_yday,
+        "days_in_year": 366 if _is_leap(this_year) else 365,
+    }
+
+    # --- Records ---------------------------------------------------------
+    def _book_dict(b: dict) -> dict:
+        return {
+            "id": b["id"],
+            "title": b["title"],
+            "authors": b["authors"],
+            "format": b.get("book_format"),
+        }
+
+    longest_pages = max(
+        (b for b in books if b.get("pages")),
+        key=lambda b: int(b["pages"]),
+        default=None,
+    )
+    longest_audio = max(
+        (b for b in books if b.get("audio_seconds")),
+        key=lambda b: int(b["audio_seconds"]),
+        default=None,
+    )
+    most_expensive = max(
+        (b for b in books if b.get("price")),
+        key=lambda b: float(b["price"]),
+        default=None,
+    )
+    oldest_book = min(
+        (b for b in books if (b.get("published_date") or "")[:4].isdigit()),
+        key=lambda b: int(b["published_date"][:4]),
+        default=None,
+    )
+    records = {
+        "longest_pages": (
+            {**_book_dict(longest_pages), "pages": int(longest_pages["pages"])}
+            if longest_pages else None
+        ),
+        "longest_audio": (
+            {
+                **_book_dict(longest_audio),
+                "audio_seconds": int(longest_audio["audio_seconds"]),
+                "hours": round(int(longest_audio["audio_seconds"]) / 3600.0, 1),
+            }
+            if longest_audio else None
+        ),
+        "most_expensive": (
+            {**_book_dict(most_expensive), "price": round(float(most_expensive["price"]), 2)}
+            if most_expensive else None
+        ),
+        "oldest_book": (
+            {**_book_dict(oldest_book), "published_year": int(oldest_book["published_date"][:4])}
+            if oldest_book else None
+        ),
+    }
+
+    # --- Author stats ----------------------------------------------------
+    # First-author only — joint authors get attributed to whoever leads
+    # the byline.
+    author_counts = Counter()
+    author_read = Counter()
+    author_spend = defaultdict(float)
+    for b in books:
+        first = (b["authors"] or "").split(",", 1)[0].strip()
+        if not first or first.lower() == "unknown":
+            continue
+        author_counts[first] += 1
+        if b["reading_status"] == "read":
+            author_read[first] += 1
+        if b.get("price") is not None:
+            author_spend[first] += float(b["price"])
+
+    top_authors_collected = [
+        {"name": n, "count": c} for n, c in author_counts.most_common(8)
+    ]
+    top_authors_read = [
+        {"name": n, "count": c} for n, c in author_read.most_common(8)
+    ]
+    top_authors_spend = [
+        {"name": n, "value": round(v, 2)}
+        for n, v in sorted(author_spend.items(), key=lambda x: -x[1])[:8]
+    ]
+
+    # --- Rating distribution --------------------------------------------
+    rating_hist = {str(i): 0 for i in range(1, 6)}
+    for b in books:
+        if b.get("rating"):
+            rating_hist[str(int(b["rating"]))] += 1
+
     return {
         "counts": {
             "total": total,
@@ -276,4 +432,35 @@ def compute_metrics(user_id: int) -> dict:
         "read_vs_listened": read_vs_listened,
         "categories": categories,
         "top_by_value": top_by_value,
+        "lifetime": {
+            "books_finished": lifetime["books_finished"],
+            "pages_read": lifetime["pages_read"],
+            "audio_seconds": lifetime["audio_seconds"],
+            "hours_listened": lifetime_hours,
+            "spend": round(lifetime["spend"], 2),
+            "books_with_pages": lifetime["books_with_pages"],
+            "books_with_audio": lifetime["books_with_audio"],
+        },
+        "this_year": this_year_block,
+        "by_year": by_year,
+        "records": records,
+        "authors": {
+            "top_collected": top_authors_collected,
+            "top_read": top_authors_read,
+            "top_spend": top_authors_spend,
+        },
+        "rating_hist": rating_hist,
     }
+
+
+def _year_of(date_str: str | None) -> int | None:
+    if not date_str:
+        return None
+    try:
+        return int(str(date_str)[:4])
+    except (ValueError, TypeError):
+        return None
+
+
+def _is_leap(year: int) -> bool:
+    return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)

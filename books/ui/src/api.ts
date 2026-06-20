@@ -302,6 +302,12 @@ export const api = {
         });
     },
 
+    async autoLengthLibrary(username: string): Promise<any> {
+        return apiFetch(`/${username}/metrics/auto-length`, {
+            method: 'POST',
+        });
+    },
+
     async getRecommendations(username: string): Promise<any> {
         return apiFetch(`/${username}/recommendations`);
     },

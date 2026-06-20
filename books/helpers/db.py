@@ -242,6 +242,7 @@ def init_db() -> None:
     _migrate_user_series_rating()
     _migrate_third_fav()
     _migrate_price()
+    _migrate_length_fields()
     _migrate_recommendation_dismissals()
     _migrate_review()
     _migrate_manual_category()
@@ -678,6 +679,31 @@ def _migrate_price() -> None:
     if "price" not in cols:
         conn.execute("ALTER TABLE books ADD COLUMN price REAL")
         log.info("Added price column to books")
+    conn.commit()
+    conn.close()
+
+
+def _migrate_length_fields() -> None:
+    """Add pages + audio_seconds + finish_year to books.
+
+    pages — page count for physical / ebook (so we can sum pages-read).
+    audio_seconds — duration of the audio edition (sum hours-listened).
+    finish_year — denormalised year-of-date_finished for fast yearly
+    grouping in /metrics. Computed from date_finished on insert/update.
+    """
+    conn = get_db()
+    cols = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(books)").fetchall()
+    }
+    if "pages" not in cols:
+        conn.execute("ALTER TABLE books ADD COLUMN pages INTEGER")
+        log.info("Added pages column to books")
+    if "audio_seconds" not in cols:
+        conn.execute(
+            "ALTER TABLE books ADD COLUMN audio_seconds INTEGER"
+        )
+        log.info("Added audio_seconds column to books")
     conn.commit()
     conn.close()
 
@@ -1979,7 +2005,7 @@ def update_book(
         "is_all_time_fav", "is_second_fav", "is_third_fav",
         "also_physical",
         "series_ignored", "manual_category",
-        "price",
+        "price", "pages", "audio_seconds",
     }
     filtered = {
         k: v for k, v in updates.items() if k in allowed

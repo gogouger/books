@@ -20,6 +20,7 @@ from pydantic import BaseModel, field_validator
 from ..helpers import db, hardcover, metrics as metrics_helper
 from ..helpers import auto_price as auto_price_helper
 from ..helpers import auto_tags as auto_tags_helper
+from ..helpers import auto_length as auto_length_helper
 from ..helpers.auth import (
     library_owner,
     optional_user,
@@ -128,6 +129,13 @@ async def post_auto_price(auth: require_owner) -> dict:
 async def post_auto_tags(auth: require_owner) -> dict:
     """Bulk-fill sub-genre tags from Hardcover for every untagged book."""
     return await auto_tags_helper.auto_tags_user(auth["user_id"])
+
+
+@router.post("/metrics/auto-length")
+async def post_auto_length(auth: require_owner) -> dict:
+    """Bulk-fill pages + audio_seconds from Hardcover so the new
+    Lifetime / By-year metrics can actually compute."""
+    return await auto_length_helper.backfill_lengths(auth["user_id"])
 
 
 # --- Read-only routes (anonymous or authenticated) ---
