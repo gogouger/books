@@ -233,6 +233,24 @@ function render(app: HTMLElement, m: Metrics): void {
     wireAutofill(app);
     wireAutoTags(app);
     wireAutoLength(app);
+    wirePopupPositioning(app);
+}
+
+// Flip the sub-genre hover popup to right-anchored when it would
+// overflow the viewport's right edge. Pure CSS can't do this since the
+// chips wrap dynamically and we need a measurement at hover time.
+function wirePopupPositioning(app: HTMLElement): void {
+    const updateFlip = (chip: Element) => {
+        const rect = (chip as HTMLElement).getBoundingClientRect();
+        // popup max-width is 340px (see .metric-pop CSS). Leave a 16px
+        // gutter at the viewport edge.
+        const wouldOverflow = rect.left + 340 + 16 > window.innerWidth;
+        chip.classList.toggle('metric-subgenre--flip', wouldOverflow);
+    };
+    app.querySelectorAll('.metric-subgenre').forEach(chip => {
+        chip.addEventListener('mouseenter', () => updateFlip(chip));
+        chip.addEventListener('focusin', () => updateFlip(chip));
+    });
 }
 
 function renderRecordsSection(

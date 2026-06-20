@@ -2012,9 +2012,10 @@ body::before {
     position: absolute;
     top: calc(100% + 6px);
     left: 0;
+    right: auto;
     z-index: 30;
     min-width: 260px;
-    max-width: 340px;
+    max-width: min(340px, calc(100vw - 32px));
     background: var(--panel-bg);
     border-radius: 8px;
     box-shadow: 0 8px 25px rgba(0,0,0,0.18), 0 0 0 1px var(--line);
@@ -2029,6 +2030,12 @@ body::before {
     opacity: 1;
     transform: translateY(0);
     pointer-events: auto;
+}
+/* JS adds this class when the popup would overflow the viewport's
+   right edge — flip it to right-anchored instead of left-anchored. */
+.metric-subgenre--flip .metric-pop {
+    left: auto;
+    right: 0;
 }
 .metric-pop-h {
     font-size: 0.72rem;
@@ -2049,7 +2056,7 @@ body::before {
 }
 .metric-pop-item {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.4rem;
     padding: 0.22rem 0.3rem;
     border-radius: 4px;
@@ -2057,7 +2064,11 @@ body::before {
     font-size: 0.75rem;
     text-decoration: none;
     line-height: 1.3;
+    /* Long theology titles ('From Eden to the New Jerusalem…') wrap
+       cleanly instead of overflowing or truncating. */
+    word-break: break-word;
 }
+.metric-pop-dot { margin-top: 0.32rem; }
 .metric-pop-item:hover {
     background: var(--muted-bg);
     color: var(--ink);
