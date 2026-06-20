@@ -50,13 +50,15 @@ export async function renderFavs(): Promise<void> {
             s.is_all_time_fav === 1
             || s.is_second_fav === 1
             || s.is_third_fav === 1
-            || s.is_favorite === 1,
+            || s.is_favorite === 1
+            || Number(s.user_rating) === 5,
         );
         const seriesTier = (s: any) =>
             s.is_all_time_fav === 1 ? 0
             : s.is_second_fav === 1 ? 1
             : s.is_third_fav === 1 ? 2
-            : 3;
+            : Number(s.user_rating) === 5 ? 3
+            : 4;
         favSeries.sort((a: any, b: any) => {
             const t = seriesTier(a) - seriesTier(b);
             if (t !== 0) return t;

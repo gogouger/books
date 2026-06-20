@@ -76,6 +76,11 @@ export function updateNavbar(): void {
     navLinks.style.display = '';
     navUser.style.display = '';
 
+    // Metrics is publicly viewable — anonymous visitors see the
+    // non-money sections. The backend strips price/spend before
+    // returning the payload.
+    navMetricsItem.style.display = '';
+
     const isOwner = user && (user.username === libraryUser || user.is_superuser);
 
     if (isOwner) {

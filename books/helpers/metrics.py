@@ -67,8 +67,13 @@ def _normalise_tag(tag: str) -> str:
     return _TAG_ALIAS.get(key, tag.strip().title())
 
 
-def compute_metrics(user_id: int) -> dict:
-    """Aggregate library counts + value + breakdowns for one user."""
+def compute_metrics(user_id: int, is_owner: bool = True) -> dict:
+    """Aggregate library counts + value + breakdowns for one user.
+
+    When `is_owner=False` the output strips every money-related field so
+    the page can be served to anonymous visitors without exposing what
+    the user paid for their library.
+    """
     conn = db.get_db()
     rows = conn.execute(
         """
@@ -256,6 +261,11 @@ def compute_metrics(user_id: int) -> dict:
         if not _parse_tags(b.get("tags"))
     )
 
+    # --- Money-stripping for non-owner viewers ---------------------------
+    # Everything from here-on still gets computed, then a final scrub
+    # happens at the return statement. Keeping the compute paths the
+    # same avoids accidentally diverging behavior for the two views.
+
     # --- Lifetime + this-year totals + by-year breakdown ----------------
     # Pages/audio totals only count READ books with the data field set —
     # we don't extrapolate from estimates so the headline numbers stay
@@ -410,7 +420,74 @@ def compute_metrics(user_id: int) -> dict:
         if b.get("rating"):
             rating_hist[str(int(b["rating"]))] += 1
 
+    # --- Strip money fields for non-owner viewers ------------------------
+    if not is_owner:
+        # Drop everything that exposes purchase price / spend.
+        value_block = {
+            "untagged_count": untagged_count,
+            "unpriced_count": total - priced_count,
+        }
+        formats_public = [
+            {"format": f["format"], "count": f["count"]} for f in formats
+        ]
+        categories_public = [
+            {
+                "name": c["name"], "count": c["count"], "read": c["read"],
+                "subgenres": c["subgenres"],
+            }
+            for c in categories
+        ]
+        records_public = {
+            "longest_pages": records["longest_pages"],
+            "longest_audio": records["longest_audio"],
+            "oldest_book": records["oldest_book"],
+            # most_expensive removed
+        }
+        authors_public = {
+            "top_collected": top_authors_collected,
+            "top_read": top_authors_read,
+            # top_spend removed
+        }
+        by_year_public = [
+            {k: v for k, v in y.items() if k != "spend"}
+            for y in by_year
+        ]
+        this_year_public = {
+            k: v for k, v in this_year_block.items() if k != "spend"
+        }
+        lifetime_public = {
+            "books_finished": lifetime["books_finished"],
+            "pages_read": lifetime["pages_read"],
+            "audio_seconds": lifetime["audio_seconds"],
+            "hours_listened": lifetime_hours,
+            "books_with_pages": lifetime["books_with_pages"],
+            "books_with_audio": lifetime["books_with_audio"],
+        }
+        return {
+            "is_owner": False,
+            "counts": {
+                "total": total,
+                "owned": owned,
+                "read": read,
+                "reading": reading,
+                "unread": unread,
+                "percent_read": round(100 * read / total, 1) if total else 0,
+            },
+            "value": value_block,
+            "tiers": tiers,
+            "formats": formats_public,
+            "read_vs_listened": read_vs_listened,
+            "categories": categories_public,
+            "lifetime": lifetime_public,
+            "this_year": this_year_public,
+            "by_year": by_year_public,
+            "records": records_public,
+            "authors": authors_public,
+            "rating_hist": rating_hist,
+        }
+
     return {
+        "is_owner": True,
         "counts": {
             "total": total,
             "owned": owned,

@@ -111,10 +111,22 @@ def _is_owner(
 
 
 @router.get("/metrics")
-def get_metrics(auth: require_owner) -> dict:
-    """Owner-only library metrics: counts, value, tier + category + sub-genre
-    breakdowns, top-N by price."""
-    return metrics_helper.compute_metrics(auth["user_id"])
+def get_metrics(
+    owner: library_owner,
+    viewer: optional_user,
+) -> dict:
+    """Library metrics. Anyone can see the non-money breakdowns
+    (counts, pages read, hours listened, sub-genres, records, authors,
+    ratings). Money sections (value totals, spend, prices, most-spent
+    author column, top-by-price section) are stripped for non-owners.
+    """
+    is_owner = (
+        viewer is not None
+        and (viewer["user_id"] == owner["id"] or viewer.get("is_superuser"))
+    )
+    return metrics_helper.compute_metrics(
+        owner["id"], is_owner=is_owner,
+    )
 
 
 @router.post("/metrics/auto-price")

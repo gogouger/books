@@ -4,20 +4,21 @@ import { getUser } from '../auth';
 import { navigate } from '../router';
 
 type Metrics = {
+    is_owner: boolean;
     counts: {
         total: number; owned: number; read: number;
         reading: number; unread: number; percent_read: number;
     };
     value: {
-        total: number; owned: number; avg: number;
-        priced_count: number; unpriced_count: number;
+        total?: number; owned?: number; avg?: number;
+        priced_count?: number; unpriced_count: number;
         untagged_count: number;
     };
     tiers: {
         gold: number; silver: number; bronze: number;
         five_star: number; hearted: number;
     };
-    formats: Array<{ format: string; count: number; value: number }>;
+    formats: Array<{ format: string; count: number; value?: number }>;
     read_vs_listened: {
         read: { count: number; value: number };
         listened: { count: number; value: number };
@@ -25,7 +26,7 @@ type Metrics = {
     };
     categories: Array<{
         name: string; count: number; read: number;
-        value: number;
+        value?: number;
         subgenres: Array<{
             name: string;
             count: number;
@@ -33,34 +34,35 @@ type Metrics = {
             books: Array<{ id: number; title: string; is_read: boolean }>;
         }>;
     }>;
-    top_by_value: Array<{
+    top_by_value?: Array<{
         id: number; title: string; authors: string;
         price: number; format: string | null;
     }>;
     lifetime: {
         books_finished: number; pages_read: number;
-        audio_seconds: number; hours_listened: number; spend: number;
+        audio_seconds: number; hours_listened: number;
+        spend?: number;
         books_with_pages: number; books_with_audio: number;
     };
     this_year: {
         year: number; finished: number; pages: number;
-        hours: number; spend: number;
+        hours: number; spend?: number;
         day_of_year: number; days_in_year: number;
     };
     by_year: Array<{
         year: number; finished: number; pages: number;
-        audio_seconds: number; hours: number; spend: number;
+        audio_seconds: number; hours: number; spend?: number;
     }>;
     records: {
         longest_pages: { id: number; title: string; authors: string; format: string | null; pages: number } | null;
         longest_audio: { id: number; title: string; authors: string; format: string | null; audio_seconds: number; hours: number } | null;
-        most_expensive: { id: number; title: string; authors: string; format: string | null; price: number } | null;
+        most_expensive?: { id: number; title: string; authors: string; format: string | null; price: number } | null;
         oldest_book: { id: number; title: string; authors: string; format: string | null; published_year: number } | null;
     };
     authors: {
         top_collected: Array<{ name: string; count: number }>;
         top_read: Array<{ name: string; count: number }>;
-        top_spend: Array<{ name: string; value: number }>;
+        top_spend?: Array<{ name: string; value: number }>;
     };
     rating_hist: { [k: string]: number };
 };
@@ -68,14 +70,9 @@ type Metrics = {
 export async function renderMetrics(): Promise<void> {
     const app = document.getElementById('app')!;
     const username = getLibraryUsername()!;
-    const user = getUser();
 
-    if (!user || user.username !== username) {
-        // Metrics are private. Send the user to their own library; if they
-        // don't have one, the existing redirects handle it.
-        navigate('#/favs');
-        return;
-    }
+    // Public read access — anonymous viewers see the non-money sections.
+    // The backend strips money fields when the viewer isn't the owner.
 
     app.innerHTML = `
         <div class="text-center py-5">
@@ -104,12 +101,14 @@ function render(app: HTMLElement, m: Metrics): void {
             minimumFractionDigits: 2, maximumFractionDigits: 2,
         })}`;
 
-    const autoFillBtn = m.value.unpriced_count > 0
+    // Owner-only fill buttons. Anon viewers don't see them — they
+    // wouldn't be allowed to call the POST endpoints anyway.
+    const autoFillBtn = m.is_owner && (m.value.unpriced_count || 0) > 0
         ? `<button class="btn btn-sm btn-outline-secondary" id="metrics-autofill-btn">
               <i class="bi bi-magic"></i> Auto-fill ${m.value.unpriced_count} prices
            </button>`
         : '';
-    const autoTagsBtn = m.value.untagged_count > 0
+    const autoTagsBtn = m.is_owner && (m.value.untagged_count || 0) > 0
         ? `<button class="btn btn-sm btn-outline-secondary" id="metrics-autotags-btn">
               <i class="bi bi-tags"></i> Auto-fill ${m.value.untagged_count} tags
            </button>`
@@ -117,7 +116,7 @@ function render(app: HTMLElement, m: Metrics): void {
     const missingLength =
         (m.counts.total - m.lifetime.books_with_pages)
         + (m.counts.total - m.lifetime.books_with_audio);
-    const autoLengthBtn = missingLength > 0
+    const autoLengthBtn = m.is_owner && missingLength > 0
         ? `<button class="btn btn-sm btn-outline-secondary" id="metrics-autolength-btn">
               <i class="bi bi-clock-history"></i> Backfill lengths
            </button>`
@@ -144,7 +143,7 @@ function render(app: HTMLElement, m: Metrics): void {
                 ${tile(formatHours(m.lifetime.hours_listened), 'Listened', m.lifetime.books_with_audio
                     ? `${m.lifetime.books_with_audio} audiobooks · ${Math.round(m.lifetime.hours_listened/24)} days`
                     : 'no audio durations yet')}
-                ${tile(usd(m.lifetime.spend), 'Spent', `${m.value.priced_count} of ${m.counts.total} priced`)}
+                ${m.is_owner ? tile(usd(m.lifetime.spend || 0), 'Spent', `${m.value.priced_count} of ${m.counts.total} priced`) : ''}
             </div>
         `)}
 
@@ -153,15 +152,15 @@ function render(app: HTMLElement, m: Metrics): void {
                 ${tile(m.this_year.finished.toLocaleString(), 'Books this year')}
                 ${tile(m.this_year.pages.toLocaleString(), 'Pages this year')}
                 ${tile(formatHours(m.this_year.hours), 'Listened this year')}
-                ${tile(usd(m.this_year.spend), 'Bought this year')}
+                ${m.is_owner ? tile(usd(m.this_year.spend || 0), 'Bought this year') : ''}
             </div>
         `)}
 
         ${section('03', 'Overview', 'Library composition', `
             <div class="metric-tiles">
                 ${tile(m.counts.total.toLocaleString(), 'Books in library')}
-                ${tile(usd(m.value.avg), 'Average price', m.value.avg
-                    ? `n=${m.value.priced_count}` : '—')}
+                ${m.is_owner ? tile(usd(m.value.avg || 0), 'Average price', m.value.avg
+                    ? `n=${m.value.priced_count}` : '—') : ''}
                 ${tile(`${m.counts.percent_read}%`, 'Read overall', `${m.counts.read} read · ${m.counts.reading} reading · ${m.counts.unread} unread`)}
                 ${tile(m.counts.owned.toLocaleString(), 'Owned', `${m.counts.total - m.counts.owned} ghosts`)}
             </div>
@@ -169,8 +168,12 @@ function render(app: HTMLElement, m: Metrics): void {
 
         ${section('04', 'Read vs listened', 'Page-eyes vs ear-canals on what you finished', `
             <div class="metric-tiles">
-                ${tile(m.read_vs_listened.read.count.toLocaleString(), 'Read', `physical + ebook · ${usd(m.read_vs_listened.read.value)} spent`)}
-                ${tile(m.read_vs_listened.listened.count.toLocaleString(), 'Listened', `audiobooks · ${usd(m.read_vs_listened.listened.value)} spent`)}
+                ${tile(m.read_vs_listened.read.count.toLocaleString(), 'Read', m.is_owner
+                    ? `physical + ebook · ${usd(m.read_vs_listened.read.value)} spent`
+                    : 'physical + ebook')}
+                ${tile(m.read_vs_listened.listened.count.toLocaleString(), 'Listened', m.is_owner
+                    ? `audiobooks · ${usd(m.read_vs_listened.listened.value)} spent`
+                    : 'audiobooks')}
                 ${tile(`${m.read_vs_listened.percent_listened}%`, 'Listened share', `of everything finished`)}
             </div>
         `)}
@@ -185,15 +188,15 @@ function render(app: HTMLElement, m: Metrics): void {
             </div>
         `)}
 
-        ${section('06', 'Formats', 'Counts + spend per format', `
+        ${section('06', 'Formats', m.is_owner ? 'Counts + spend per format' : 'Counts per format', `
             <table class="metrics-table">
-                <thead><tr><th>Format</th><th class="num">Count</th><th class="num">Spend</th></tr></thead>
+                <thead><tr><th>Format</th><th class="num">Count</th>${m.is_owner ? '<th class="num">Spend</th>' : ''}</tr></thead>
                 <tbody>
                     ${m.formats.map(f => `
                         <tr>
                             <td>${escText(formatLabel(f.format))}</td>
                             <td class="num">${f.count.toLocaleString()}</td>
-                            <td class="num">${f.value ? usd(f.value) : '—'}</td>
+                            ${m.is_owner ? `<td class="num">${f.value ? usd(f.value) : '—'}</td>` : ''}
                         </tr>
                     `).join('')}
                 </tbody>
@@ -210,11 +213,11 @@ function render(app: HTMLElement, m: Metrics): void {
 
         ${renderRatingHistogram(m)}
 
-        ${section('99', 'Top by price', 'The most expensive books in the library', m.top_by_value.length ? `
+        ${m.is_owner && m.top_by_value && m.top_by_value.length ? section('99', 'Top by price', 'The most expensive books in the library', `
             <table class="metrics-table">
                 <thead><tr><th>Title</th><th>Author</th><th>Format</th><th class="num">Price</th></tr></thead>
                 <tbody>
-                    ${m.top_by_value.map(b => `
+                    ${(m.top_by_value || []).map(b => `
                         <tr>
                             <td><a href="#/book/${b.id}">${escText(b.title)}</a></td>
                             <td>${escText(b.authors)}</td>
@@ -224,7 +227,7 @@ function render(app: HTMLElement, m: Metrics): void {
                     `).join('')}
                 </tbody>
             </table>
-        ` : `<p class="text-muted small mb-0">Add prices to see this list.</p>`)}
+        `) : ''}
     `;
 
     wireAutofill(app);
@@ -255,7 +258,7 @@ function renderRecordsSection(
             </li>
         `);
     }
-    if (r.most_expensive) {
+    if (m.is_owner && r.most_expensive) {
         items.push(`
             <li class="metric-record">
                 <span class="metric-record-label">Most expensive</span>
@@ -285,16 +288,24 @@ function renderByYearSection(
 ): string {
     if (!m.by_year.length) return '';
     const maxFinished = Math.max(...m.by_year.map(y => y.finished), 1);
-    const rows = m.by_year.map(y => `
+    const rows = m.by_year.map(y => {
+        const spendBit = m.is_owner && y.spend ? ` · ${usd(y.spend)}` : '';
+        const metaPieces = [
+            y.pages ? `${y.pages.toLocaleString()} pp` : '',
+            y.hours ? formatHours(y.hours) : '',
+            m.is_owner && y.spend ? usd(y.spend) : '',
+        ].filter(Boolean).join(' · ');
+        return `
         <div class="metric-year-row">
             <span class="metric-year-label">${y.year}</span>
-            <div class="metric-year-bar-wrap" title="${y.finished} finished · ${y.pages.toLocaleString()} pages · ${formatHours(y.hours)} · ${usd(y.spend)}">
+            <div class="metric-year-bar-wrap" title="${y.finished} finished · ${y.pages.toLocaleString()} pages · ${formatHours(y.hours)}${spendBit}">
                 <div class="metric-year-bar" style="width: ${Math.round(100 * y.finished / maxFinished)}%"></div>
                 <span class="metric-year-n">${y.finished}</span>
             </div>
-            <span class="metric-year-meta">${y.pages ? `${y.pages.toLocaleString()} pp` : ''}${y.pages && y.hours ? ' · ' : ''}${y.hours ? formatHours(y.hours) : ''}${(y.pages || y.hours) && y.spend ? ' · ' : ''}${y.spend ? usd(y.spend) : ''}</span>
+            <span class="metric-year-meta">${metaPieces}</span>
         </div>
-    `).join('');
+    `;
+    }).join('');
     return section(
         '11', 'By year', 'Finishes per year (bars), spend + pages alongside',
         `<div class="metric-year-chart">${rows}</div>`,
@@ -311,8 +322,17 @@ function renderAuthorsSection(
                 <li><span class="metric-author-name">${escText(r.name)}</span><span class="metric-author-n">${suffix(r)}</span></li>
               `).join('')}</ol>`
             : '<p class="text-muted small mb-0">—</p>';
+    const spendCol = m.is_owner && a.top_spend
+        ? `<div>
+              <div class="metric-author-h">Most spent on</div>
+              ${list(a.top_spend, r => usd(r.value || 0))}
+           </div>`
+        : '';
+    const subtitle = m.is_owner
+        ? 'Who fills your shelf — by count, by reads, by spend'
+        : 'Who fills the shelf — by count and by reads';
     return section(
-        '12', 'Authors', 'Who fills your shelf — by count, by reads, by spend',
+        '12', 'Authors', subtitle,
         `<div class="metric-author-cols">
             <div>
                 <div class="metric-author-h">Most collected</div>
@@ -322,10 +342,7 @@ function renderAuthorsSection(
                 <div class="metric-author-h">Most read</div>
                 ${list(a.top_read, r => `${r.count}`)}
             </div>
-            <div>
-                <div class="metric-author-h">Most spent on</div>
-                ${list(a.top_spend, r => usd(r.value || 0))}
-            </div>
+            ${spendCol}
         </div>`,
     );
 }
