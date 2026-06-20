@@ -52,10 +52,18 @@ export async function renderSeriesView(
                 return pa - pb;
             });
 
-        const readCount = books.filter(b => b.reading_status === 'read').length;
-        const notOwnedCount = books.filter(b => b.is_owned === 0).length;
-        const ghostCount = ghosts.length;
-        const totalSlots = books.length + ghostCount;
+        // Counts only include canonical main-line books — drop the
+        // fractional-position novellas the user hasn't finished, since
+        // the merged list above already excludes them. Without this the
+        // header read "8 books · 5 not in library" while only 3 main
+        // slots actually rendered, making the user think books were
+        // missing when they were just hidden novellas.
+        const mainBooks = books.filter(b => !isHiddenShortStory(b));
+        const mainGhosts = ghosts.filter(g => !isHiddenShortStory(g));
+        const readCount = mainBooks.filter(b => b.reading_status === 'read').length;
+        const notOwnedCount = mainBooks.filter(b => b.is_owned === 0).length;
+        const ghostCount = mainGhosts.length;
+        const totalSlots = mainBooks.length + ghostCount;
         const notOwnedLabel = notOwnedCount > 0
             ? ` &middot; <span class="text-not-owned">${notOwnedCount} not owned</span>`
             : '';
@@ -63,7 +71,7 @@ export async function renderSeriesView(
             ? ` &middot; <span class="text-muted">${ghostCount} not in library</span>`
             : '';
 
-        const segmentsHtml = renderSegmentedBar(books, ghostCount);
+        const segmentsHtml = renderSegmentedBar(mainBooks, ghostCount);
         const isOwner: boolean = data.is_owner;
         const monitored: boolean = data.monitored !== false;
         const seriesComplete: boolean = data.series_complete !== false;

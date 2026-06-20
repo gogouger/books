@@ -2648,6 +2648,8 @@ def get_series_entry_counts(
                AND ues.user_id = ?
            WHERE {_EFFECTIVE_STATUS} = 'linked'
                AND LOWER(se.title) NOT LIKE 'untitled%'
+               AND (se.position IS NULL
+                    OR se.position = CAST(se.position AS INTEGER))
            GROUP BY se.series_link_id""",
         (user_id, user_id),
     ).fetchall()
@@ -2691,6 +2693,8 @@ def get_series_ghost_entries(
            WHERE se.series_link_id = ?
                AND {_EFFECTIVE_STATUS} = 'linked'
                AND LOWER(se.title) NOT LIKE 'untitled%'
+               AND (se.position IS NULL
+                    OR se.position = CAST(se.position AS INTEGER))
                AND NOT EXISTS (
                    SELECT 1 FROM books b
                    WHERE b.user_id = ?
@@ -2742,6 +2746,8 @@ def get_ghost_entries_for_user(
                AND ues.user_id = ?
            WHERE {_EFFECTIVE_STATUS} = 'linked'
                AND LOWER(se.title) NOT LIKE 'untitled%'
+               AND (se.position IS NULL
+                    OR se.position = CAST(se.position AS INTEGER))
                AND EXISTS (
                    SELECT 1 FROM books b
                    WHERE b.user_id = ?
