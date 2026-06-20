@@ -68,9 +68,12 @@ class BookUpdate(BaseModel):
 
     @field_validator("rating")
     @classmethod
-    def validate_rating(cls, v: int | None) -> int | None:
-        if v is not None and (v < 1 or v > 5):
-            raise ValueError("rating must be between 1 and 5")
+    def validate_rating(cls, v: float | None) -> float | None:
+        if v is None:
+            return v
+        # Allow 0.5-step half-star ratings in [0.5, 5.0].
+        if v < 0.5 or v > 5.0 or (v * 2) % 1 != 0:
+            raise ValueError("rating must be a half-star value in [0.5, 5.0]")
         return v
 
     @field_validator("reading_status")

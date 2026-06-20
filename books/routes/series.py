@@ -216,6 +216,23 @@ def update_series(
             fields["is_second_fav"] = updates.is_second_fav
         if updates.is_third_fav is not None:
             fields["is_third_fav"] = updates.is_third_fav
+
+        # Tier invariants — mirror the book-side enforcement in
+        # routes/books.py: any tier set to true forces is_favorite=true
+        # and clears the other two tier bits.
+        if fields.get("is_all_time_fav"):
+            fields["is_favorite"] = True
+            fields["is_second_fav"] = False
+            fields["is_third_fav"] = False
+        elif fields.get("is_second_fav"):
+            fields["is_favorite"] = True
+            fields["is_all_time_fav"] = False
+            fields["is_third_fav"] = False
+        elif fields.get("is_third_fav"):
+            fields["is_favorite"] = True
+            fields["is_all_time_fav"] = False
+            fields["is_second_fav"] = False
+
         db.update_user_series_fields(user_id, series_link_id, fields)
 
     if updates.entries:
