@@ -2,9 +2,11 @@ import { bookCardHtml, isHiddenShortStory } from './book-card';
 import { navigate } from '../router';
 import { api } from '../api';
 import { getLibraryUsername } from '../context';
+import { renderInlineSeriesControls } from '../pages/series-list';
 
 export interface BookGridOptions {
     grouped?: boolean;  // emit per-series section headers
+    seriesMap?: Map<number, any>;  // series_link_id → series data, for header controls
 }
 
 export function bookGridHtml(
@@ -49,7 +51,33 @@ export function bookGridHtml(
     let out = '';
     for (const key of groupOrder) {
         const g = groupMap[key];
-        out += `<h4 class="library-group-heading">${escapeHtml(g.heading)}</h4>`;
+        // For real series groups (key is a numeric series_link_id and we
+        // have series state in the map), render the rate/heart/tier
+        // controls right next to the heading — most discoverable spot.
+        const slid = key === '__standalones__' ? null : Number(key);
+        const series = slid != null && opts.seriesMap?.get(slid);
+        let controls = '';
+        if (slid != null) {
+            const seriesLink = `<a href="#/series/${slid}" class="library-group-link">${escapeHtml(g.heading)}</a>`;
+            if (series) {
+                controls = renderInlineSeriesControls(
+                    slid,
+                    Number(series.user_rating ?? 0),
+                    series.is_favorite === 1,
+                    series.is_all_time_fav === 1,
+                    series.is_second_fav === 1,
+                    series.is_third_fav === 1,
+                );
+            }
+            out += `
+                <div class="library-group-row">
+                    <h4 class="library-group-heading">${seriesLink}</h4>
+                    ${controls}
+                </div>
+            `;
+        } else {
+            out += `<h4 class="library-group-heading">${escapeHtml(g.heading)}</h4>`;
+        }
         out += '<div class="book-grid" data-collapsible="1">';
         for (const b of g.books) out += bookCardHtml(b);
         out += '</div>';
@@ -99,6 +127,11 @@ export function attachGridClickHandlers(
     // Star + heart inline-interactivity. Same semantics as the rec page:
     // click a star to rate-as-read, click the heart to toggle favourite.
     wireInlineRatings(container);
+
+    // Series controls in the library group headings: re-uses the same
+    // .series-card-controls / .series-card-star / .series-card-btn DOM
+    // emitted by series-list.ts, so we wire the same actions here.
+    wireSeriesHeadingControls(container);
 
     container.querySelectorAll<HTMLButtonElement>('.series-expand-toggle').forEach(btn => {
         btn.addEventListener('click', (e) => {
@@ -306,4 +339,93 @@ function setCardFavorite(card: HTMLElement, on: boolean): void {
     card.dataset.favorite = on ? '1' : '0';
     const btn = card.querySelector<HTMLElement>('.card-heart');
     if (btn) btn.classList.toggle('on', on);
+}
+
+// Click handler for the rate/heart/tier strip rendered next to series
+// group headings on /library. The strip is the same DOM as the series-
+// list cards (.series-card-controls with data-action buttons), so this
+// handler dispatches the same patch shape via api.updateSeries.
+function wireSeriesHeadingControls(container: HTMLElement): void {
+    if ((container as any)._seriesCtrlsBound) return;
+    (container as any)._seriesCtrlsBound = true;
+
+    container.addEventListener('click', async (ev) => {
+        const target = ev.target as HTMLElement;
+        const btn = target.closest<HTMLElement>(
+            '.series-card-controls .series-card-star, .series-card-controls .series-card-btn'
+        );
+        if (!btn) return;
+        // Only handle hits inside library-group-row — leave series-list
+        // page cards to attachSeriesGridHandlers.
+        if (!btn.closest('.library-group-row')) return;
+        ev.stopPropagation();
+        ev.preventDefault();
+
+        const seriesId = parseInt(btn.dataset.seriesId || '0', 10);
+        if (!seriesId) return;
+        const action = btn.dataset.action;
+        const username = getLibraryUsername();
+        if (!username) return;
+
+        let patch: Record<string, any> = {};
+        if (action === 'rate') {
+            const next = parseInt(btn.dataset.rate || '0', 10);
+            const group = btn.parentElement!;
+            const current = group.querySelectorAll<HTMLElement>(
+                '.series-card-star.filled'
+            ).length;
+            patch = { rating: next === current ? null : next };
+        } else if (action === 'heart') {
+            patch = { is_favorite: !btn.classList.contains('is-on') };
+        } else if (action === 'bronze') {
+            patch = btn.classList.contains('is-on')
+                ? { is_third_fav: false }
+                : { is_third_fav: true, is_second_fav: false, is_all_time_fav: false };
+        } else if (action === 'silver') {
+            patch = btn.classList.contains('is-on')
+                ? { is_second_fav: false }
+                : { is_second_fav: true, is_all_time_fav: false, is_third_fav: false };
+        } else if (action === 'gold') {
+            patch = btn.classList.contains('is-on')
+                ? { is_all_time_fav: false }
+                : { is_all_time_fav: true, is_second_fav: false, is_third_fav: false };
+        } else {
+            return;
+        }
+
+        try {
+            await api.updateSeries(username, seriesId, patch);
+            // Local UI update — flip the clicked control's state without
+            // a full re-render. star row + tier buttons are mutually
+            // exclusive within the group.
+            const row = btn.closest<HTMLElement>('.series-card-controls')!;
+            if (action === 'rate') {
+                const next = patch.rating ?? 0;
+                row.querySelectorAll<HTMLElement>('.series-card-star').forEach((s, i) => {
+                    s.classList.toggle('filled', i < next);
+                });
+            } else if (action === 'heart') {
+                btn.classList.toggle('is-on', !!patch.is_favorite);
+            } else {
+                ['bronze','silver','gold'].forEach(tier => {
+                    const tb = row.querySelector<HTMLElement>(`[data-action="${tier}"]`);
+                    if (tb) tb.classList.toggle(
+                        'is-on',
+                        tier === action && !btn.previousElementSibling?.classList.contains('is-on'),
+                    );
+                });
+                // Simpler: just re-derive from the patch.
+                ['bronze','silver','gold'].forEach(tier => {
+                    const tb = row.querySelector<HTMLElement>(`[data-action="${tier}"]`);
+                    if (!tb) return;
+                    const key = tier === 'bronze' ? 'is_third_fav'
+                        : tier === 'silver' ? 'is_second_fav'
+                        : 'is_all_time_fav';
+                    if (key in patch) tb.classList.toggle('is-on', !!patch[key]);
+                });
+            }
+        } catch (err: any) {
+            alert(`Failed: ${err.message || err}`);
+        }
+    });
 }

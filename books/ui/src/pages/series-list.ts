@@ -483,8 +483,9 @@ export function renderSeriesCard(s: any): string {
 // pressing a button doesn't navigate into the series. Buttons carry
 // data-action+data-series-id so the central handler in
 // attachSeriesGridHandlers can dispatch one click listener for the whole
-// grid instead of per-card listeners.
-function renderInlineSeriesControls(
+// grid instead of per-card listeners. Exported so /library group
+// headings can render the same controls right next to the series name.
+export function renderInlineSeriesControls(
     seriesId: number,
     rating: number,
     isFavorite: boolean,

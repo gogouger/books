@@ -27,6 +27,12 @@ let pendingAuthorFilter: string | null = null;
 // Infinite scroll + cache state.
 let allBooks: any[] = [];
 let totalBooks = 0;
+// series_link_id → series row (rating + is_favorite + tier flags). Loaded
+// once per page mount so the grouped library view can render
+// per-series controls in the group headings without an extra fetch per
+// group. Stays null when the load hasn't happened or failed — bookGridHtml
+// tolerates missing entries and just falls back to a plain heading.
+let seriesMap: Map<number, any> | null = null;
 let savedScrollY = 0;
 let isLoading = false;
 let observer: IntersectionObserver | null = null;
@@ -67,6 +73,7 @@ export function updateCachedBook(bookId: number, updates: Record<string, any>): 
 // Preserves savedScrollY so the library can restore scroll position on re-render.
 export function invalidateLibraryCache(): void {
     allBooks = [];
+    seriesMap = null;
     totalBooks = 0;
     lastLoadedState = null;
     cachedSeries = null;
@@ -202,7 +209,7 @@ async function renderBooksView(): Promise<void> {
         const countEl = document.getElementById('book-count');
         const grouped = currentState.view === 'books-grouped';
         const filtered = applyClientCategoryFilter(allBooks);
-        gridContainer.innerHTML = bookGridHtml(filtered, { grouped });
+        gridContainer.innerHTML = bookGridHtml(filtered, { grouped, seriesMap: seriesMap ?? undefined });
         attachGridClickHandlers(gridContainer, applyAuthorFilter);
         if (countEl) {
             const n = filtered.length;
@@ -252,6 +259,27 @@ async function loadMoreBooks(): Promise<void> {
     const sentinel = document.getElementById('scroll-sentinel');
     const countEl = document.getElementById('book-count');
     const isFirstBatch = offset === 0;
+
+    // First batch only: side-load all series rows in parallel so the
+    // grouped library view can render per-series controls in the
+    // group headings (the "ARCANE ASCENSION" line gets ★ ♥ 3 2 1 next
+    // to it). Wrapped in try so a series-endpoint hiccup never blocks
+    // the books fetch — the grouped view just falls back to a plain
+    // heading when seriesMap is empty.
+    if (isFirstBatch && seriesMap === null) {
+        try {
+            const resp = await api.getSeries(username, true);
+            const m = new Map<number, any>();
+            for (const s of (resp?.series || [])) {
+                if (s?.series_link_id != null) {
+                    m.set(Number(s.series_link_id), s);
+                }
+            }
+            seriesMap = m;
+        } catch {
+            seriesMap = new Map();
+        }
+    }
 
     if (isFirstBatch) {
         gridContainer.innerHTML = `
@@ -349,7 +377,7 @@ async function loadMoreBooks(): Promise<void> {
         if (isFirstBatch) {
             allBooks = data.books;
             const filtered = applyClientCategoryFilter(allBooks);
-            gridContainer.innerHTML = bookGridHtml(filtered, { grouped });
+            gridContainer.innerHTML = bookGridHtml(filtered, { grouped, seriesMap: seriesMap ?? undefined });
             attachGridClickHandlers(gridContainer, applyAuthorFilter);
         } else {
             allBooks = allBooks.concat(data.books);
@@ -358,7 +386,7 @@ async function loadMoreBooks(): Promise<void> {
                 // boundaries between batches, and so client category
                 // filter applies to all loaded rows.
                 const filtered = applyClientCategoryFilter(allBooks);
-                gridContainer.innerHTML = bookGridHtml(filtered, { grouped });
+                gridContainer.innerHTML = bookGridHtml(filtered, { grouped, seriesMap: seriesMap ?? undefined });
                 attachGridClickHandlers(gridContainer, applyAuthorFilter);
             } else {
                 appendToBookGrid(gridContainer, data.books, applyAuthorFilter);
