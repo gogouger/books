@@ -221,25 +221,31 @@ body::before {
     flex-direction: column;
     gap: 0.3rem;
 }
+/* Inline action row on every library/favs book card — stars + heart.
+   Matches the series-card-controls treatment so the rate/heart pattern
+   is visible across the whole site. */
 .card-meta-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding-top: 0.4rem;
+    padding: 0.4rem 0.3rem 0.3rem;
     border-top: 1px solid var(--line);
+    background: color-mix(in srgb, var(--accent) 4%, var(--panel-bg));
+    border-radius: 0 0 4px 4px;
+    margin-top: 0.2rem;
 }
-.card-stars { display: flex; gap: 1px; }
+.card-stars { display: flex; gap: 0; }
 .card-star {
     background: transparent;
     border: none;
-    padding: 2px 1px;
+    padding: 3px 2px;
     cursor: pointer;
-    color: var(--line2);
-    font-size: 0.82rem;
+    color: var(--muted);
+    font-size: 1rem;
     line-height: 1;
     transition: color 0.1s ease, transform 0.1s ease;
 }
-.card-star:hover { transform: scale(1.12); }
+.card-star:hover { transform: scale(1.15); }
 .card-star.hovered,
 .card-star.filled { color: #c8893b; }
 [data-bs-theme=dark] .card-star.hovered,
@@ -248,15 +254,15 @@ body::before {
 .card-heart {
     background: transparent;
     border: none;
-    padding: 3px 5px;
+    padding: 4px 6px;
     cursor: pointer;
     color: var(--muted);
-    font-size: 0.85rem;
+    font-size: 1rem;
     line-height: 1;
-    border-radius: 3px;
-    transition: color 0.12s ease, background 0.12s ease;
+    border-radius: 4px;
+    transition: color 0.12s ease, background 0.12s ease, transform 0.1s ease;
 }
-.card-heart:hover { color: var(--ink); background: var(--muted-bg); }
+.card-heart:hover { color: var(--ink); background: var(--muted-bg); transform: scale(1.1); }
 .card-heart.on { color: #c2454e; }
 .card-heart.on:hover { color: #a8323a; }
 [data-bs-theme=dark] .card-heart.on { color: #ec6973; }
