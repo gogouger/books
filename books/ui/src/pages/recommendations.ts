@@ -73,10 +73,17 @@ export async function renderRecommendations(): Promise<void> {
 
     app.innerHTML = loadingHtml('Building recommendations…');
 
+    // Capture the route at request time. If the user clicks away during
+    // the (potentially 30-second) Hardcover compute, we don't want the
+    // late response to slam the current page back to /recommendations.
+    const startHash = window.location.hash;
+
     try {
         const data = await api.getRecommendations(username) as RecsPayload;
+        if (window.location.hash !== startHash) return;
         render(app, username, data);
     } catch (err: any) {
+        if (window.location.hash !== startHash) return;
         app.innerHTML = `
             <div class="alert alert-danger">
                 Failed to load recommendations: ${err.message}
@@ -168,9 +175,16 @@ function recCardHtml(rec: Rec): string {
     const fav = rec.is_favorite ? '1' : '0';
     const inLib = !!bookId;
 
+    // Width/height attrs reserve aspect-ratio space immediately so the
+    // card doesn't collapse to zero height while the HC CDN URL is
+    // still loading and then snap to full size on load. The CSS still
+    // controls the actual rendered size; these attrs are about the
+    // intrinsic ratio the browser uses before the image arrives.
     const cover = rec.cover_url
         ? `<img class="rec-cover" src="${rec.cover_url}"
                 alt="${escAttr(rec.title)}"
+                width="168" height="252"
+                loading="lazy" decoding="async"
                 data-role="primary"
                 onerror="this.outerHTML='&lt;div class=&quot;rec-cover-placeholder&quot; data-role=&quot;primary&quot;&gt;&lt;i class=&quot;bi bi-book&quot;&gt;&lt;/i&gt;&lt;/div&gt;'"
                 referrerpolicy="no-referrer">`
@@ -430,10 +444,13 @@ function wireRefresh(app: HTMLElement, username: string): void {
     btn.addEventListener('click', async () => {
         btn.disabled = true;
         app.innerHTML = loadingHtml('Recomputing recommendations…');
+        const startHash = window.location.hash;
         try {
             const data = await api.refreshRecommendations(username) as RecsPayload;
+            if (window.location.hash !== startHash) return;
             render(app, username, data);
         } catch (err: any) {
+            if (window.location.hash !== startHash) return;
             app.innerHTML = `
                 <div class="alert alert-danger">
                     Refresh failed: ${err.message}
