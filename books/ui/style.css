@@ -841,33 +841,35 @@ body::before {
                 0 4px 14px rgba(192, 192, 192, 0.2) !important;
 }
 
-/* Compact rate/heart/tier controls inline on each series-list card.
-   Matches the minimalist book-card meta-row: hairline divider, no button
-   chrome, accent colour only when the toggle is on. */
+/* Rate/heart/tier controls inline on every series-list card. They sit
+   on a hairline divider above the bottom of the card with a contrasting
+   chip background so they're actually discoverable. */
 .series-card-controls {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
     margin-top: auto;
-    padding-top: 0.4rem;
+    padding: 0.45rem 0.3rem 0.35rem;
     border-top: 1px solid var(--line);
+    background: color-mix(in srgb, var(--accent) 4%, var(--panel-bg));
+    border-radius: 0 0 4px 4px;
     flex-wrap: nowrap;
 }
 .series-card-stars {
     display: inline-flex;
-    gap: 1px;
+    gap: 0;
     line-height: 1;
 }
 .series-card-star {
     background: transparent;
     border: 0;
-    padding: 2px 1px;
-    color: var(--line2);
-    font-size: 0.82rem;
+    padding: 3px 2px;
+    color: var(--muted);
+    font-size: 1rem;
     cursor: pointer;
     transition: color 0.1s ease, transform 0.1s ease;
 }
-.series-card-star:hover { transform: scale(1.12); }
+.series-card-star:hover { transform: scale(1.15); }
 .series-card-star.filled,
 .series-card-star.hovered { color: #c8893b; }
 [data-bs-theme=dark] .series-card-star.filled,
@@ -876,16 +878,20 @@ body::before {
 .series-card-btn {
     background: transparent;
     border: 0;
-    padding: 3px 4px;
+    padding: 4px 5px;
     color: var(--muted);
-    font-size: 0.82rem;
+    font-size: 1rem;
     cursor: pointer;
-    border-radius: 3px;
-    transition: color 0.12s ease, background 0.12s ease;
+    border-radius: 4px;
+    transition: color 0.12s ease, background 0.12s ease, transform 0.1s ease;
     margin-left: auto;
 }
 .series-card-btn + .series-card-btn { margin-left: 0; }
-.series-card-btn:hover { background: var(--muted-bg); color: var(--ink); }
+.series-card-btn:hover {
+    background: var(--muted-bg);
+    color: var(--ink);
+    transform: scale(1.1);
+}
 
 .series-card-btn--heart.is-on { color: #c2454e; }
 .series-card-btn--silver.is-on { color: #7a7a7a; }
