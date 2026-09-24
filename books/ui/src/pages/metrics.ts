@@ -203,7 +203,7 @@ function render(app: HTMLElement, m: Metrics): void {
             </table>
         `)}
 
-        ${m.categories.map(c => renderCategoryBlock(c, usd)).join('')}
+        ${m.categories.map(c => renderCategoryBlock(c, usd, m.is_owner)).join('')}
 
         ${renderRecordsSection(m, usd)}
 
@@ -548,6 +548,7 @@ function wireAutofill(app: HTMLElement): void {
 function renderCategoryBlock(
     c: Metrics['categories'][number],
     usd: (n: number) => string,
+    isOwner: boolean,
 ): string {
     const num = String(catNumber(c.name)).padStart(2, '0');
     const pct = c.count ? Math.round(100 * c.read / c.count) : 0;
@@ -585,7 +586,15 @@ function renderCategoryBlock(
            </div>`
         : `<p class="text-muted small mb-0">No sub-genre tags yet.</p>`;
 
-    return section(num, c.name, `${c.count} books · ${pct}% read · ${usd(c.value)} spent`, subgenresHtml);
+    const spend = isOwner && c.value != null
+        ? ` · ${usd(c.value)} spent`
+        : '';
+    return section(
+        num,
+        c.name,
+        `${c.count} books · ${pct}% read${spend}`,
+        subgenresHtml,
+    );
 }
 
 function catNumber(name: string): number {
