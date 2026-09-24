@@ -1531,6 +1531,12 @@ def get_books(
 ) -> list[dict]:
     conditions = [
         "user_id = ?", "series_ignored = 0",
+        # Fractional series positions are novellas, excerpts, and other
+        # supplementary entries. Keep them off the public shelf until the
+        # reader has actually finished them; read entries remain visible.
+        """(series_index IS NULL
+            OR series_index = CAST(series_index AS INTEGER)
+            OR reading_status = 'read')""",
         # Hide unowned+unread books from unmonitored series
         """NOT (is_owned = 0
             AND reading_status = 'unread'
@@ -1627,7 +1633,13 @@ def get_books(
 
     where = " AND ".join(conditions)
     query = f"""
-        SELECT * FROM books
+        SELECT books.*,
+               (SELECT se.cover_url
+                FROM series_entries se
+                WHERE se.series_link_id = books.series_link_id
+                    AND se.position = books.series_index
+                LIMIT 1) AS cover_url
+        FROM books
         WHERE {where}
         ORDER BY {sort_col} {order_dir}
         LIMIT ? OFFSET ?
@@ -1657,6 +1669,11 @@ def count_books(
 ) -> int:
     conditions = [
         "user_id = ?", "series_ignored = 0",
+        # Must mirror get_books() so pagination totals describe the cards
+        # the API can actually return.
+        """(series_index IS NULL
+            OR series_index = CAST(series_index AS INTEGER)
+            OR reading_status = 'read')""",
         # Hide unowned+unread books from unmonitored series
         """NOT (is_owned = 0
             AND reading_status = 'unread'
@@ -2431,6 +2448,10 @@ def get_series_list(
                        = b.series_link_id
                        AND b2.user_id = b.user_id
                        AND b2.series_ignored = 0
+                       AND (b2.series_index IS NULL
+                            OR b2.series_index =
+                                CAST(b2.series_index AS INTEGER)
+                            OR b2.reading_status = 'read')
                    ORDER BY (b2.series_index IS NULL),
                             b2.series_index ASC,
                             b2.id ASC
@@ -2440,6 +2461,10 @@ def get_series_list(
                        = b.series_link_id
                        AND b2.user_id = b.user_id
                        AND b2.series_ignored = 0
+                       AND (b2.series_index IS NULL
+                            OR b2.series_index =
+                                CAST(b2.series_index AS INTEGER)
+                            OR b2.reading_status = 'read')
                    ORDER BY (b2.series_index IS NULL),
                             b2.series_index ASC,
                             b2.id ASC
@@ -2449,6 +2474,10 @@ def get_series_list(
                        = b.series_link_id
                        AND b2.user_id = b.user_id
                        AND b2.series_ignored = 0
+                       AND (b2.series_index IS NULL
+                            OR b2.series_index =
+                                CAST(b2.series_index AS INTEGER)
+                            OR b2.reading_status = 'read')
                    ORDER BY (b2.series_index IS NULL),
                             b2.series_index ASC,
                             b2.id ASC
@@ -2458,10 +2487,30 @@ def get_series_list(
                        = b.series_link_id
                        AND b2.user_id = b.user_id
                        AND b2.series_ignored = 0
+                       AND (b2.series_index IS NULL
+                            OR b2.series_index =
+                                CAST(b2.series_index AS INTEGER)
+                            OR b2.reading_status = 'read')
                    ORDER BY (b2.series_index IS NULL),
                             b2.series_index ASC,
                             b2.id ASC
-                   LIMIT 1) as first_book_cover_updated_at
+                   LIMIT 1) as first_book_cover_updated_at,
+                  (SELECT se2.cover_url
+                   FROM books b2
+                   LEFT JOIN series_entries se2
+                       ON se2.series_link_id = b2.series_link_id
+                       AND se2.position = b2.series_index
+                   WHERE b2.series_link_id = b.series_link_id
+                       AND b2.user_id = b.user_id
+                       AND b2.series_ignored = 0
+                       AND (b2.series_index IS NULL
+                            OR b2.series_index =
+                                CAST(b2.series_index AS INTEGER)
+                            OR b2.reading_status = 'read')
+                   ORDER BY (b2.series_index IS NULL),
+                            b2.series_index ASC,
+                            b2.id ASC
+                   LIMIT 1) as first_book_cover_url
            FROM books b
            JOIN series_link sl
                ON b.series_link_id = sl.id
@@ -2470,6 +2519,10 @@ def get_series_list(
                AND us.user_id = ?
            WHERE b.user_id = ?
                AND b.series_ignored = 0
+               AND (b.series_index IS NULL
+                    OR b.series_index =
+                        CAST(b.series_index AS INTEGER)
+                    OR b.reading_status = 'read')
                {monitored_filter}
            GROUP BY b.series_link_id
            HAVING COUNT(*) > 1
@@ -2498,6 +2551,10 @@ def get_series_list(
            WHERE b.user_id = ?
                AND b.series_link_id IS NOT NULL
                AND b.series_ignored = 0
+               AND (b.series_index IS NULL
+                    OR b.series_index =
+                        CAST(b.series_index AS INTEGER)
+                    OR b.reading_status = 'read')
            ORDER BY b.series_link_id,
                COALESCE(se.position,
                    b.series_index, 999)""",
@@ -3167,7 +3224,8 @@ def get_series_books(
 ) -> list[dict]:
     conn = get_db()
     rows = conn.execute(
-        """SELECT b.*, se.position as hc_position
+        """SELECT b.*, se.position as hc_position,
+                  se.cover_url as cover_url
            FROM books b
            LEFT JOIN series_entries se
                ON se.series_link_id = b.series_link_id

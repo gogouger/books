@@ -442,6 +442,11 @@ export function renderSeriesCard(s: any): string {
         ? `<img src="${api.coverUrl(s.first_book_user_id, s.first_book_cover_filename, s.first_book_cover_updated_at)}"
                 alt="${escapeHtml(s.series)}" loading="lazy"
                 onerror="this.outerHTML='&lt;div class=&quot;no-cover&quot;&gt;&lt;i class=&quot;bi bi-collection&quot;&gt;&lt;/i&gt;&lt;/div&gt;'">`
+        : s.first_book_cover_url
+        ? `<img src="${escapeAttr(s.first_book_cover_url)}"
+                alt="${escapeHtml(s.series)}" loading="lazy"
+                referrerpolicy="no-referrer"
+                onerror="this.outerHTML='&lt;div class=&quot;no-cover&quot;&gt;&lt;i class=&quot;bi bi-collection&quot;&gt;&lt;/i&gt;&lt;/div&gt;'">`
         : `<div class="no-cover"><i class="bi bi-collection"></i></div>`;
 
     const tierCrown =
@@ -611,4 +616,8 @@ function escapeHtml(text: string): string {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function escapeAttr(text: string): string {
+    return escapeHtml(text).replace(/"/g, '&quot;');
 }

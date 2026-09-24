@@ -13,6 +13,11 @@ export function bookCardHtml(book: any): string {
         ? `<img src="${api.coverUrl(book.user_id, book.cover_filename, book.cover_updated_at)}"
                alt="${escapeHtml(book.title)}" loading="lazy"
                onerror="this.outerHTML='&lt;div class=&quot;no-cover&quot;&gt;&lt;i class=&quot;bi bi-book&quot;&gt;&lt;/i&gt;&lt;/div&gt;'">`
+        : book.cover_url
+        ? `<img src="${escapeAttr(book.cover_url)}"
+               alt="${escapeHtml(book.title)}" loading="lazy"
+               referrerpolicy="no-referrer"
+               onerror="this.outerHTML='&lt;div class=&quot;no-cover&quot;&gt;&lt;i class=&quot;bi bi-book&quot;&gt;&lt;/i&gt;&lt;/div&gt;'">`
         : `<div class="no-cover"><i class="bi bi-book"></i></div>`;
 
     const seriesText = book.series
