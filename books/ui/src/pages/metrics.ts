@@ -96,10 +96,12 @@ export async function renderMetrics(): Promise<void> {
 }
 
 function render(app: HTMLElement, m: Metrics): void {
-    const usd = (n: number) =>
-        `$${n.toLocaleString(undefined, {
+    const usd = (n: number | null | undefined) => {
+        if (typeof n !== 'number' || !Number.isFinite(n)) return '—';
+        return `$${n.toLocaleString(undefined, {
             minimumFractionDigits: 2, maximumFractionDigits: 2,
         })}`;
+    };
 
     // Owner-only fill buttons. Anon viewers don't see them — they
     // wouldn't be allowed to call the POST endpoints anyway.

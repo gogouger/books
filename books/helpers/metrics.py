@@ -82,9 +82,13 @@ def compute_metrics(user_id: int, is_owner: bool = True) -> dict:
                is_owned, reading_status, rating, is_favorite,
                is_all_time_fav, is_second_fav, is_third_fav,
                price, pages, audio_seconds,
-               date_finished, date_added, published_date
+               date_finished, date_added, published_date,
+               series_index
         FROM books
         WHERE user_id = ?
+          AND (series_index IS NULL
+               OR series_index = CAST(series_index AS INTEGER)
+               OR reading_status = 'read')
         """,
         (user_id,),
     ).fetchall()

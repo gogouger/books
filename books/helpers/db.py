@@ -239,6 +239,7 @@ def init_db() -> None:
     _migrate_series_complete()
     _migrate_book_format()
     _migrate_also_physical()
+    _migrate_book_tiers()
     _migrate_user_series_rating()
     _migrate_third_fav()
     _migrate_price()
@@ -660,6 +661,31 @@ def _migrate_third_fav() -> None:
                 "is_third_fav INTEGER DEFAULT 0"
             )
             log.info("Added is_third_fav to %s", table)
+    conn.commit()
+    conn.close()
+
+
+def _migrate_book_tiers() -> None:
+    """Ensure the original gold/silver tier columns exist on books.
+
+    Production databases predate the migration runner and already have
+    these columns, but a database created from today's base schema does
+    not. Keep this idempotent so both upgrade and clean-install paths work.
+    """
+    conn = get_db()
+    cols = {
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(books)"
+        ).fetchall()
+    }
+    for column in ("is_all_time_fav", "is_second_fav"):
+        if column not in cols:
+            conn.execute(
+                f"ALTER TABLE books ADD COLUMN {column} "
+                "INTEGER DEFAULT 0"
+            )
+            log.info("Added %s to books", column)
     conn.commit()
     conn.close()
 
