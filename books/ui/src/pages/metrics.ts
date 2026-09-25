@@ -263,7 +263,7 @@ function renderRecordsSection(
     if (r.longest_pages) {
         items.push(`
             <li class="metric-record">
-                <span class="metric-record-label">Longest read</span>
+                <span class="metric-record-label">Longest finished book</span>
                 <a href="#/book/${r.longest_pages.id}" class="metric-record-title">${escText(r.longest_pages.title)}</a>
                 <span class="metric-record-meta">${r.longest_pages.pages.toLocaleString()} pages · ${escText(authorFirst(r.longest_pages.authors))}</span>
             </li>
@@ -272,7 +272,7 @@ function renderRecordsSection(
     if (r.longest_audio) {
         items.push(`
             <li class="metric-record">
-                <span class="metric-record-label">Longest listen</span>
+                <span class="metric-record-label">Longest finished audiobook</span>
                 <a href="#/book/${r.longest_audio.id}" class="metric-record-title">${escText(r.longest_audio.title)}</a>
                 <span class="metric-record-meta">${formatHours(r.longest_audio.hours)} · ${escText(authorFirst(r.longest_audio.authors))}</span>
             </li>
@@ -281,7 +281,7 @@ function renderRecordsSection(
     if (m.is_owner && r.most_expensive) {
         items.push(`
             <li class="metric-record">
-                <span class="metric-record-label">Most expensive</span>
+                <span class="metric-record-label">Most expensive owned book</span>
                 <a href="#/book/${r.most_expensive.id}" class="metric-record-title">${escText(r.most_expensive.title)}</a>
                 <span class="metric-record-meta">${usd(r.most_expensive.price)} · ${escText(authorFirst(r.most_expensive.authors))}</span>
             </li>
@@ -290,7 +290,7 @@ function renderRecordsSection(
     if (r.oldest_book) {
         items.push(`
             <li class="metric-record">
-                <span class="metric-record-label">Oldest published</span>
+                <span class="metric-record-label">Oldest published owned book</span>
                 <a href="#/book/${r.oldest_book.id}" class="metric-record-title">${escText(r.oldest_book.title)}</a>
                 <span class="metric-record-meta">${r.oldest_book.published_year} · ${escText(authorFirst(r.oldest_book.authors))}</span>
             </li>
@@ -298,7 +298,7 @@ function renderRecordsSection(
     }
     if (!items.length) return '';
     return section(
-        '10', 'Records', 'The headline-grabbers',
+        '10', 'Records', 'Finished-book records and owned-shelf records',
         `<ul class="metric-records-list">${items.join('')}</ul>`,
     );
 }
