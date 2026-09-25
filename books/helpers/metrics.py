@@ -348,23 +348,32 @@ def compute_metrics(user_id: int, is_owner: bool = True) -> dict:
             "format": b.get("book_format"),
         }
 
+    # Records describe completed reading, not merely the contents of the
+    # shelf.  Include finished books whether or not they are still owned,
+    # but never let an unread owned book or series placeholder win.
+    finished_books = [
+        b for b in books if b["reading_status"] == "read"
+    ]
     longest_pages = max(
-        (b for b in books if b.get("pages")),
+        (b for b in finished_books if b.get("pages")),
         key=lambda b: int(b["pages"]),
         default=None,
     )
     longest_audio = max(
-        (b for b in books if b.get("audio_seconds")),
+        (b for b in finished_books if b.get("audio_seconds")),
         key=lambda b: int(b["audio_seconds"]),
         default=None,
     )
     most_expensive = max(
-        (b for b in books if b.get("price")),
+        (b for b in finished_books if b.get("price")),
         key=lambda b: float(b["price"]),
         default=None,
     )
     oldest_book = min(
-        (b for b in books if (b.get("published_date") or "")[:4].isdigit()),
+        (
+            b for b in finished_books
+            if (b.get("published_date") or "")[:4].isdigit()
+        ),
         key=lambda b: int(b["published_date"][:4]),
         default=None,
     )
