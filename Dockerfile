@@ -13,4 +13,4 @@ RUN uv sync --frozen
 
 EXPOSE 80
 
-CMD ["uv", "run", "gunicorn", "books.main:app", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:80"]
+CMD ["/app/.venv/bin/gunicorn", "books.main:app", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:80"]
