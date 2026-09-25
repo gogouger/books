@@ -2058,7 +2058,11 @@ body::before {
     overflow-x: auto;
     padding-bottom: 0.1rem;
 }
-.metric-row--wrap { flex-wrap: wrap; }
+.metric-row--wrap {
+    flex-wrap: wrap;
+    overflow: visible;
+    padding-bottom: 0;
+}
 .metric-chip {
     display: inline-flex;
     align-items: baseline;
