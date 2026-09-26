@@ -306,7 +306,7 @@ python scripts/import_calibre.py --db /path/to/calibre/metadata.db
 
 ## Deployed as Library
 
-This codebase is deployed publicly as **Library** at <https://books.gordongouger.com> behind Authelia SSO. Anonymous visitors can browse the collection read-only; mutations + file downloads require login. The production wiring lives in [gogouger/infra](https://github.com/gogouger/infra).
+This codebase is deployed publicly as **Library** at <https://library.gordongouger.com> behind Authelia SSO. Anonymous visitors can browse the collection read-only; mutations + file downloads require login. The production wiring lives in [gogouger/infra](https://github.com/gogouger/infra).
 
 ## License
 

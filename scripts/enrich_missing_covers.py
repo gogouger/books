@@ -31,7 +31,7 @@ import httpx
 from books.helpers import db, hardcover
 
 
-USER_AGENT = "meron-books-bot/1.0 gordon@ggouger.com"
+USER_AGENT = "library-bot/1.0 gordon@ggouger.com"
 OL_SEARCH = "https://openlibrary.org/search.json"
 OL_COVER = "https://covers.openlibrary.org/b/id/{cover_id}-L.jpg"
 GBOOKS = "https://www.googleapis.com/books/v1/volumes"

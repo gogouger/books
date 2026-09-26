@@ -1673,7 +1673,7 @@ body::before {
     .book-detail .btn-sm { padding: 0.4rem 0.7rem; }
 }
 
-/* card-status (Athenaeum) — small text badge below the title spelling out
+/* card-status (Library) — small text badge below the title spelling out
    what the colored gutter is implying. Belt-and-suspenders so visitors don't
    have to guess what "slightly greyed out cover" means. */
 .card-status {
