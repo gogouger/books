@@ -9,7 +9,7 @@ export function renderLogin(): void {
             <div class="card shadow-sm">
                 <div class="card-body p-4">
                     <h3 class="text-center mb-4">
-                        <i class="bi bi-bookshelf"></i> Athenaeum
+                        <i class="bi bi-bookshelf"></i> Library
                     </h3>
                     <div id="login-error" class="alert alert-danger d-none"></div>
                     <div id="google-signin-button" class="d-flex justify-content-center"></div>

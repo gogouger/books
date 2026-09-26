@@ -1,4 +1,4 @@
-/* Inline SSO modal — same UX as the personal-site & Meron flow.
+/* Inline SSO modal — same UX as the personal-site & Athletic Analytics flow.
    Click "Sign In" → modal pops up → POST to /__authlogin → on success,
    refetch /api/auth/me and re-render rather than full page reload. */
 
@@ -13,7 +13,7 @@ function build(): HTMLElement {
     modal.className = 'login-modal';
     modal.style.cssText = 'position:fixed;inset:0;z-index:1080;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(8,10,9,.55);';
     modal.innerHTML = `
-      <div class="login-card" role="dialog" aria-modal="true" aria-label="Sign in to Athenaeum"
+      <div class="login-card" role="dialog" aria-modal="true" aria-label="Sign in to Library"
            style="position:relative;width:100%;max-width:360px;background:var(--bs-body-bg);
                   color:var(--bs-body-color);border:1px solid var(--bs-border-color);
                   border-radius:12px;padding:24px;box-shadow:0 18px 50px rgba(0,0,0,.3);">
@@ -24,7 +24,7 @@ function build(): HTMLElement {
         <p class="text-uppercase mb-1" style="font-size:11px;letter-spacing:.16em;">
           <span style="color:var(--bs-secondary-color)">#</span> Sign in
         </p>
-        <p class="text-muted small mb-3">One login for the site, Meron &amp; Athenaeum.</p>
+        <p class="text-muted small mb-3">One login for the site, Athletic Analytics &amp; Library.</p>
         <form class="login-form" novalidate>
           <div class="mb-2">
             <label for="lm-user" class="form-label small mb-1">Username</label>
